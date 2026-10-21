@@ -16,6 +16,8 @@ export function createMarkdown(): MarkdownIt {
 export interface ParsedDoc {
   frontMatter: Record<string, unknown> | undefined;
   frontMatterError: string | undefined;
+  /** The number of source lines of the front matter, with its `---` lines. */
+  frontMatterLines: number;
   tokens: Token[];
   env: Record<string, unknown>;
 }
@@ -26,10 +28,12 @@ export function parseDoc(md: MarkdownIt, source: string): ParsedDoc {
   let body = source;
   let frontMatter: Record<string, unknown> | undefined;
   let frontMatterError: string | undefined;
+  let frontMatterLines = 0;
   const match = FRONT_MATTER.exec(source);
   if (match) {
     // Keep the line count, so that token line maps stay correct.
-    body = '\n'.repeat(match[0].split('\n').length - 1) + source.slice(match[0].length);
+    frontMatterLines = match[0].split('\n').length - 1;
+    body = '\n'.repeat(frontMatterLines) + source.slice(match[0].length);
     try {
       const data = yaml.load(match[1]);
       if (data && typeof data === 'object' && !Array.isArray(data)) {
@@ -41,5 +45,5 @@ export function parseDoc(md: MarkdownIt, source: string): ParsedDoc {
   }
   const env: Record<string, unknown> = {};
   const tokens = md.parse(body, env);
-  return { frontMatter, frontMatterError, tokens, env };
+  return { frontMatter, frontMatterError, frontMatterLines, tokens, env };
 }

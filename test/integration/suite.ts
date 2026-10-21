@@ -56,7 +56,27 @@ async function steps(): Promise<void> {
   assert.notEqual(diffTab.g.viewColumn, panelTab.g.viewColumn, 'the two tabs are in different groups');
   assert.ok(vscode.window.tabGroups.activeTabGroup === diffTab.g, 'the source diff keeps the focus');
 
-  // 2. An edit of the working file updates the rendered diff.
+  // 2. Scroll sync. Editor to rendered diff:
+  const editor = await waitFor('the modified editor', () =>
+    vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === file.toString()),
+  );
+  editor.revealRange(new vscode.Range(100, 0, 100, 0), vscode.TextEditorRevealType.AtTop);
+  const down = await waitFor('the rendered diff to scroll down', () => (api.lastSynced ?? 0) > 300 && api.lastSynced);
+  editor.revealRange(new vscode.Range(0, 0, 0, 0), vscode.TextEditorRevealType.AtTop);
+  await waitFor('the rendered diff to scroll up', () => api.lastSynced !== undefined && api.lastSynced < down / 4);
+  console.log('MDIFF INTEGRATION: editor line 100 -> webview offset', down);
+
+  // Rendered diff to editor:
+  await new Promise((r) => setTimeout(r, 300));
+  api.testScroll(down);
+  const line = await waitFor('the editor to scroll', () => {
+    const top = editor.visibleRanges[0]?.start.line ?? 0;
+    return top > 50 && top;
+  });
+  console.log('MDIFF INTEGRATION: webview offset', down, '-> editor line', line);
+  assert.ok(Math.abs(line - 100) <= 6, `the editor shows about line 100 (${line})`);
+
+  // 3. An edit of the working file updates the rendered diff.
   const doc = await vscode.workspace.openTextDocument(file);
   const edit = new vscode.WorkspaceEdit();
   edit.insert(file, new vscode.Position(doc.lineCount, 0), '\nA new closing paragraph.\n');
@@ -64,7 +84,7 @@ async function steps(): Promise<void> {
   await waitFor('the live update', () => api.lastMessage?.html.includes('closing'));
   await vscode.commands.executeCommand('workbench.action.files.revert');
 
-  // 3. The command for a file against HEAD.
+  // 4. The command for a file against HEAD.
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   await waitFor('the panel to close', () => !api.panelVisible && api.pair === undefined);
   await vscode.commands.executeCommand('mdiff.compareWithHead', file);

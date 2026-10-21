@@ -68,6 +68,75 @@
     $('pos').textContent = total === 0 ? 'no changes' : current < 0 ? `${total} change${total === 1 ? '' : 's'}` : `${current + 1} / ${total}`;
   }
 
+  // Scroll sync with the editor. Each row has the source lines of each side, for example
+  // data-b="12,15". Positions between the first and last line of a row are interpolated.
+  // The editor shows the new side (b), so the sync uses the b lines.
+  const SIDE = 'b';
+  let ignoreScrollUntil = 0;
+
+  function range(row) {
+    const v = row.dataset[SIDE];
+    if (!v) return undefined;
+    const [start, end] = v.split(',').map(Number);
+    return [start, Math.max(end, start + 1)];
+  }
+
+  function visibleRows() {
+    const rows = [];
+    for (const row of content.querySelectorAll('.row')) {
+      if (row.offsetHeight === 0) continue;
+      const rect = row.getBoundingClientRect();
+      rows.push({ row, top: rect.top + window.scrollY, height: rect.height, r: range(row) });
+    }
+    return rows;
+  }
+
+  /** The page offset that shows the source line `line` at the top of the view. */
+  function offsetOfLine(line) {
+    const rows = visibleRows().filter((x) => x.r);
+    let k = -1;
+    rows.forEach((x, i) => { if (x.r[0] <= line) k = i; });
+    if (k < 0) return rows.length ? rows[0].top : 0;
+    const cur = rows[k];
+    if (line < cur.r[1]) return cur.top + ((line - cur.r[0]) / (cur.r[1] - cur.r[0])) * cur.height;
+    // The line is in the gap after this block, for example a blank line.
+    const end = cur.top + cur.height;
+    const next = rows[k + 1];
+    if (!next) return end;
+    return end + ((line - cur.r[1]) / Math.max(1, next.r[0] - cur.r[1])) * (next.top - end);
+  }
+
+  /** The source line at the top of the view. */
+  function lineAtTop() {
+    const y = window.scrollY + headerHeight();
+    const rows = visibleRows();
+    let k = rows.findIndex((x) => y < x.top + x.height);
+    if (k < 0) k = rows.length - 1;
+    if (k < 0) return 0;
+    const cur = rows[k];
+    if (cur.r) return cur.r[0] + Math.max(0, Math.min(1, (y - cur.top) / cur.height)) * (cur.r[1] - cur.r[0]);
+    // A placeholder row has no lines on this side: use the nearest row that has.
+    for (let i = k - 1; i >= 0; i--) if (rows[i].r) return rows[i].r[1];
+    for (let i = k + 1; i < rows.length; i++) if (rows[i].r) return rows[i].r[0];
+    return 0;
+  }
+
+  function scrollToLine(line) {
+    ignoreScrollUntil = Date.now() + 150;
+    window.scrollTo(0, Math.max(0, offsetOfLine(line) - headerHeight()));
+    if (vscode) vscode.postMessage({ type: 'synced', top: window.scrollY });
+  }
+
+  let scrollQueued = false;
+  window.addEventListener('scroll', () => {
+    if (!vscode || Date.now() < ignoreScrollUntil || scrollQueued) return;
+    scrollQueued = true;
+    requestAnimationFrame(() => {
+      scrollQueued = false;
+      vscode.postMessage({ type: 'reveal', line: lineAtTop() });
+    });
+  });
+
   function update(msg) {
     $('title').textContent = msg.title;
     $('label-a').textContent = msg.labelA;
@@ -91,6 +160,7 @@
     }
     current = -1;
     updatePos(msg.hunks);
+    ignoreScrollUntil = Date.now() + 150;
     window.scrollTo(0, msg.reset ? 0 : y);
     if (vscode) {
       // Facts about the page for the integration tests.
@@ -123,7 +193,12 @@
     vscode.postMessage({ type: 'open', href });
   });
   window.addEventListener('message', (e) => {
-    if (e.data && e.data.type === 'update') update(e.data);
+    const msg = e.data;
+    if (!msg) return;
+    if (msg.type === 'update') update(msg);
+    else if (msg.type === 'scroll') scrollToLine(msg.line);
+    // Only the integration tests send this: a scroll as if the reader made it.
+    else if (msg.type === 'testScroll') window.scrollTo(0, msg.y);
   });
 
   setOnly(!!state.only);

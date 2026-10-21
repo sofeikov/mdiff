@@ -32,8 +32,8 @@ export interface Block {
   key: string;
   /** Plain text, for the similarity score. */
   text: string;
-  /** First source line (0-based), if known. */
-  line?: number;
+  /** The source lines of the block: first line and the line after the last (0-based), if known. */
+  lines?: [number, number];
 }
 
 export interface TableRow {
@@ -61,7 +61,9 @@ export class BlockBuilder {
   documentBlocks(doc: ParsedDoc): Block[] {
     const blocks: Block[] = [];
     if (doc.frontMatter) {
-      blocks.push(...this.frontMatterBlocks(doc.frontMatter));
+      // All front matter blocks map to the front matter lines.
+      const lines: [number, number] = [0, doc.frontMatterLines];
+      blocks.push(...this.frontMatterBlocks(doc.frontMatter).map((b) => ({ ...b, lines })));
     }
     if (doc.frontMatterError) {
       const html = `<pre class="fm-error">Front matter error: ${this.md.utils.escapeHtml(doc.frontMatterError)}</pre>`;
@@ -95,21 +97,21 @@ export class BlockBuilder {
   private single(tok: Token): Block {
     const tokens = [tok];
     const key = this.render(tokens);
-    const line = tok.map?.[0];
+    const lines = tok.map ?? undefined;
     if (tok.type === 'math_block' || tok.type === 'math_block_eqno' || (tok.type === 'fence' && tok.info.trim().toLowerCase() === 'math')) {
-      return { kind: 'math', type: 'math', tokens, key, text: tok.content, line };
+      return { kind: 'math', type: 'math', tokens, key, text: tok.content, lines };
     }
     if (tok.type === 'fence' || tok.type === 'code_block') {
-      return { kind: 'code', type: 'code', tokens, key, text: tok.content, line };
+      return { kind: 'code', type: 'code', tokens, key, text: tok.content, lines };
     }
-    return { kind: 'opaque', type: tok.type, tokens, key, text: tok.content, line };
+    return { kind: 'opaque', type: tok.type, tokens, key, text: tok.content, lines };
   }
 
   private compound(tokens: Token[], open: number, close: number): Block {
     const tok = tokens[open];
     const slice = tokens.slice(open, close + 1);
     const key = this.render(slice);
-    const line = tok.map?.[0];
+    const lines = tok.map ?? undefined;
     const base = tok.type.replace(/_open$/, '');
 
     if ((base === 'paragraph' || base === 'heading') && close === open + 2 && tokens[open + 1].type === 'inline') {
@@ -123,18 +125,18 @@ export class BlockBuilder {
         hidden: tok.hidden,
         key,
         text: inlineText(inline),
-        line,
+        lines,
       };
     }
     if (base === 'table') {
       const rows = this.tableRows(tokens, open, close);
-      return { kind: 'table', type: 'table', tokens: slice, rows, key, text: rows.map((r) => r.text).join('\n'), line };
+      return { kind: 'table', type: 'table', tokens: slice, rows, key, text: rows.map((r) => r.text).join('\n'), lines };
     }
     if (base === 'bullet_list' || base === 'ordered_list' || base === 'list_item' || base === 'blockquote') {
       const children = this.build(tokens, open + 1, close);
-      return { kind: 'container', type: base, tokens: slice, children, key, text: children.map((c) => c.text).join('\n'), line };
+      return { kind: 'container', type: base, tokens: slice, children, key, text: children.map((c) => c.text).join('\n'), lines };
     }
-    return { kind: 'opaque', type: base, tokens: slice, key, text: slice.map((t) => t.content).join(' '), line };
+    return { kind: 'opaque', type: base, tokens: slice, key, text: slice.map((t) => t.content).join(' '), lines };
   }
 
   private tableRows(tokens: Token[], open: number, close: number): TableRow[] {

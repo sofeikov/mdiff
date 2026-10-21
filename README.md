@@ -37,11 +37,14 @@ In the rendered diff:
 
 The panel updates when you edit the file.
 
+The rendered diff and the source diff editor scroll together. Scroll either one, and the other shows the same part of the file.
+
 ## Settings
 
 | Setting | Default | Description |
 |---|---|---|
 | `mdiff.autoOpen` | `true` | Open the rendered diff when a diff of a Markdown file opens. |
+| `mdiff.scrollSync` | `true` | Scroll the rendered diff and the source diff editor together. |
 | `mdiff.formulaDiff` | `parts` | `parts`: mark only the changed parts of a formula. `whole`: mark the whole formula. |
 
 ## Development

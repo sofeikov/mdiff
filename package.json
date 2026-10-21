@@ -2,7 +2,7 @@
   "name": "mdiff",
   "displayName": "Markdown Rendered Diff",
   "description": "Shows the diff of a Markdown file as rendered output, next to the source diff.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "local",
   "license": "UNLICENSED",
   "private": true,
@@ -91,6 +91,11 @@
           ],
           "default": "parts",
           "description": "How a changed formula is marked in the rendered diff."
+        },
+        "mdiff.scrollSync": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep the scroll position of the rendered diff and of the source diff editor in step."
         }
       }
     }

@@ -5,7 +5,7 @@
 // other windows or take the focus. Set MDIFF_SHOW_WINDOW=1 to run it on the real display.
 import * as esbuild from 'esbuild';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve('.');
@@ -26,10 +26,17 @@ rmSync(ws, { recursive: true, force: true });
 mkdirSync(ws, { recursive: true });
 const git = (...args) => execFileSync('git', ['-C', ws, ...args], { stdio: 'ignore' });
 git('init', '-q');
-copyFileSync('test/fixtures/old.md', resolve(ws, 'doc.md'));
+// The same long tail on both sides, so that the document scrolls.
+let tail = '';
+for (let k = 1; k <= 60; k++) {
+  if (k % 10 === 1) tail += `\n## Section ${k}\n`;
+  tail += `\nFiller paragraph ${k}. It has some words so that it wraps on a narrow panel, and $x_${k}$ too.\n`;
+}
+const withTail = (fixture) => readFileSync(fixture, 'utf8') + tail;
+writeFileSync(resolve(ws, 'doc.md'), withTail('test/fixtures/old.md'));
 git('add', 'doc.md');
 git('-c', 'user.name=test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'old');
-copyFileSync('test/fixtures/new.md', resolve(ws, 'doc.md'));
+writeFileSync(resolve(ws, 'doc.md'), withTail('test/fixtures/new.md'));
 
 const showWindow = process.env.MDIFF_SHOW_WINDOW === '1';
 const hasXvfb = spawnSync('sh', ['-c', 'command -v xvfb-run'], { stdio: 'ignore' }).status === 0;
@@ -37,7 +44,7 @@ if (!showWindow && !hasXvfb) {
   console.error('xvfb-run is not installed. Install it (sudo apt install xvfb), or set MDIFF_SHOW_WINDOW=1 to open the test window on your display.');
   process.exit(2);
 }
-const [command, prefix] = showWindow ? [code, []] : ['xvfb-run', ['-a', code]];
+const [command, prefix] = showWindow ? [code, []] : ['xvfb-run', ['-a', '-s', '-screen 0 1600x1000x24', code]];
 
 const result = spawnSync(command, [
   ...prefix,

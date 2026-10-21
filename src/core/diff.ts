@@ -289,10 +289,11 @@ export function diffMarkdown(md: MarkdownIt, oldSource: string, newSource: strin
       }
       cls += '" data-hunk="' + result.hunks;
     }
-    const la = op.op !== 'ins' ? op.a.block.line : undefined;
-    const lb = op.op !== 'del' ? op.b.block.line : undefined;
-    if (la !== undefined) lines += ` data-line-a="${la}"`;
-    if (lb !== undefined) lines += ` data-line-b="${lb}"`;
+    // The source lines of each side, for the scroll sync with the editor.
+    const la = op.op !== 'ins' ? op.a.block.lines : undefined;
+    const lb = op.op !== 'del' ? op.b.block.lines : undefined;
+    if (la) lines += ` data-a="${la[0]},${la[1]}"`;
+    if (lb) lines += ` data-b="${lb[0]},${lb[1]}"`;
     rows.push(`<div class="row ${cls}"${lines}><div class="cell a">${left}</div><div class="cell b">${right}</div></div>`);
   });
   flushFold();

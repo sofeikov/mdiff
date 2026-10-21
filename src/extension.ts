@@ -19,6 +19,10 @@ export interface MdiffApi {
   readonly panelVisible: boolean;
   /** What the webview reported after it showed the last update. */
   readonly lastRendered: { rows: number; grid: boolean; katexFont: string } | undefined;
+  /** The scroll offset of the webview after the last scroll from the editor. */
+  readonly lastSynced: number | undefined;
+  /** Sends a scroll to the webview as if the reader made it. Only for the tests. */
+  testScroll(y: number): void;
 }
 
 export function activate(context: vscode.ExtensionContext): MdiffApi {
@@ -27,6 +31,7 @@ export function activate(context: vscode.ExtensionContext): MdiffApi {
     controller,
     vscode.window.tabGroups.onDidChangeTabs((e) => controller.onTabsChanged(e)),
     vscode.workspace.onDidChangeTextDocument((e) => controller.onDocumentChanged(e.document)),
+    vscode.window.onDidChangeTextEditorVisibleRanges((e) => controller.onEditorScrolled(e.textEditor)),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('mdiff.formulaDiff')) controller.refresh();
     }),
@@ -50,6 +55,13 @@ function formulaParts(): boolean {
   return vscode.workspace.getConfiguration('mdiff').get<string>('formulaDiff', 'parts') === 'parts';
 }
 
+function scrollSync(): boolean {
+  return vscode.workspace.getConfiguration('mdiff').get<boolean>('scrollSync', true);
+}
+
+/** After a scroll that the extension makes, ignore the scroll events that it causes for this long. */
+const ECHO_MS = 200;
+
 function isMarkdownDiff(input: unknown): input is vscode.TabInputTextDiff {
   return input instanceof vscode.TabInputTextDiff && (MARKDOWN_FILE.test(input.modified.path) || MARKDOWN_FILE.test(input.original.path));
 }
@@ -65,6 +77,9 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
   pair: DiffPair | undefined;
   lastMessage: UpdateMessage | undefined;
   lastRendered: MdiffApi['lastRendered'];
+  lastSynced: number | undefined;
+  /** Until this time, editor scroll events come from a reveal by the extension. */
+  private ignoreEditorUntil = 0;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -100,6 +115,30 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     if (uri !== pair.original.toString() && uri !== pair.modified.toString()) return;
     clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.render(false), 300);
+  }
+
+  /** Editor to webview: show the top line of the editor at the top of the rendered diff. */
+  onEditorScrolled(editor: vscode.TextEditor): void {
+    if (!scrollSync() || !this.panel || !this.ready || !this.pair || Date.now() < this.ignoreEditorUntil) return;
+    if (editor.document.uri.toString() !== this.pair.modified.toString()) return;
+    const top = editor.visibleRanges[0]?.start.line ?? 0;
+    void this.panel.webview.postMessage({ type: 'scroll', line: top });
+  }
+
+  /** Webview to editor: show the line at the top of the rendered diff at the top of the editor. */
+  private revealInEditor(line: number): void {
+    if (!scrollSync() || !this.pair) return;
+    const uri = this.pair.modified.toString();
+    const target = Math.max(0, Math.floor(line));
+    for (const editor of vscode.window.visibleTextEditors) {
+      if (editor.document.uri.toString() !== uri) continue;
+      this.ignoreEditorUntil = Date.now() + ECHO_MS;
+      editor.revealRange(new vscode.Range(target, 0, target, 0), vscode.TextEditorRevealType.AtTop);
+    }
+  }
+
+  testScroll(y: number): void {
+    void this.panel?.webview.postMessage({ type: 'testScroll', y });
   }
 
   /** Renders the current diff again, for example after a settings change. */
@@ -187,11 +226,25 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     return panel;
   }
 
-  private onMessage(msg: { type: string; href?: string; rows?: number; grid?: boolean; katexFont?: string }): void {
+  /** Scrolls the rendered diff to the current position of the editor, after a new file is shown. */
+  private syncFromEditor(): void {
+    const uri = this.pair?.modified.toString();
+    const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === uri);
+    if (editor) this.onEditorScrolled(editor);
+  }
+
+  private onMessage(msg: { type: string; href?: string; rows?: number; grid?: boolean; katexFont?: string; line?: number; top?: number }): void {
     if (msg.type === 'ready') {
       this.ready = true;
-      if (this.queued) void this.panel?.webview.postMessage(this.queued);
-      this.queued = undefined;
+      if (this.queued) {
+        void this.panel?.webview.postMessage(this.queued);
+        this.queued = undefined;
+        this.syncFromEditor();
+      }
+    } else if (msg.type === 'reveal' && typeof msg.line === 'number') {
+      this.revealInEditor(msg.line);
+    } else if (msg.type === 'synced') {
+      this.lastSynced = msg.top;
     } else if (msg.type === 'rendered') {
       this.lastRendered = { rows: msg.rows ?? 0, grid: !!msg.grid, katexFont: msg.katexFont ?? '' };
     } else if (msg.type === 'open' && msg.href) {
@@ -227,6 +280,7 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     this.lastMessage = message;
     if (this.ready) void this.panel.webview.postMessage(message);
     else this.queued = message;
+    if (reset) this.syncFromEditor();
   }
 }
 
