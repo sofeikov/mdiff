@@ -1,124 +1,28 @@
 import { diffArrays } from 'diff';
 import type { MarkdownIt } from 'markdown-it';
+import { Alignable, align, similarity } from './align';
 import { Block, BlockBuilder, TableRow } from './blocks';
+import { diffFormula } from './formula';
 import { diffInline, renderInlinePlain } from './inline';
 import { parseDoc } from './markdown';
 
-interface Alignable {
-  type: string;
-  key: string;
-  text: string;
-}
-
-export type Op<T> = { op: 'eq' | 'chg'; a: T; b: T } | { op: 'del'; a: T } | { op: 'ins'; b: T };
-
 /** Paired blocks with a lower similarity than this show as whole-block changes, not as a word diff. */
 const MIN_WORD_DIFF_SIMILARITY = 0.25;
-
-/**
- * Aligns two sequences. Equal items match first (longest common subsequence). In each gap
- * between equal items, the removed and added items of the same type pair up by similarity.
- */
-export function align<T extends Alignable>(a: T[], b: T[]): Op<T>[] {
-  const keyOf = (x: T) => `${x.type}\u0000${x.key}`;
-  const parts = diffArrays(a.map(keyOf), b.map(keyOf));
-  const ops: Op<T>[] = [];
-  let ia = 0;
-  let ib = 0;
-  let gapA: T[] = [];
-  let gapB: T[] = [];
-  const flush = () => {
-    ops.push(...pairGap(gapA, gapB));
-    gapA = [];
-    gapB = [];
-  };
-  for (const part of parts) {
-    const n = part.count ?? part.value.length;
-    if (part.removed) {
-      gapA.push(...a.slice(ia, ia + n));
-      ia += n;
-    } else if (part.added) {
-      gapB.push(...b.slice(ib, ib + n));
-      ib += n;
-    } else {
-      flush();
-      for (let k = 0; k < n; k++) ops.push({ op: 'eq', a: a[ia + k], b: b[ib + k] });
-      ia += n;
-      ib += n;
-    }
-  }
-  flush();
-  return ops;
-}
-
-function pairGap<T extends Alignable>(a: T[], b: T[]): Op<T>[] {
-  if (a.length === 0 || b.length === 0) {
-    return [...a.map((x) => ({ op: 'del' as const, a: x })), ...b.map((x) => ({ op: 'ins' as const, b: x }))];
-  }
-  // Best total similarity of an order-preserving pairing (Needleman-Wunsch, no gap cost).
-  // Blocks of the same type always pair, with a small score when they are not similar,
-  // so that a rewritten paragraph shows on the same row as the old one.
-  const n = a.length;
-  const m = b.length;
-  const score = (i: number, j: number) => {
-    if (a[i].type !== b[j].type) return -1;
-    return Math.max(similarity(a[i].text, b[j].text), 0.01);
-  };
-  const s: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
-  for (let i = 1; i <= n; i++) {
-    for (let j = 1; j <= m; j++) {
-      const p = score(i - 1, j - 1);
-      s[i][j] = Math.max(s[i - 1][j], s[i][j - 1], p > 0 ? s[i - 1][j - 1] + p : -Infinity);
-    }
-  }
-  const out: Op<T>[] = [];
-  let i = n;
-  let j = m;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0) {
-      const p = score(i - 1, j - 1);
-      if (p > 0 && s[i][j] === s[i - 1][j - 1] + p) {
-        out.push({ op: 'chg', a: a[i - 1], b: b[j - 1] });
-        i--;
-        j--;
-        continue;
-      }
-    }
-    // Walking backwards: take the added item first, so that removed items come first in the result.
-    if (j > 0 && (i === 0 || s[i][j] === s[i][j - 1])) {
-      out.push({ op: 'ins', b: b[--j] });
-    } else {
-      out.push({ op: 'del', a: a[--i] });
-    }
-  }
-  return out.reverse();
-}
-
-/** Dice coefficient of the word multisets. */
-export function similarity(x: string, y: string): number {
-  const words = (s: string) => s.toLowerCase().match(/[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu) ?? [];
-  const wx = words(x);
-  const wy = words(y);
-  if (wx.length === 0 && wy.length === 0) return 1;
-  const counts = new Map<string, number>();
-  for (const w of wx) counts.set(w, (counts.get(w) ?? 0) + 1);
-  let common = 0;
-  for (const w of wy) {
-    const c = counts.get(w) ?? 0;
-    if (c > 0) {
-      common++;
-      counts.set(w, c - 1);
-    }
-  }
-  return (2 * common) / (wx.length + wy.length);
-}
 
 type Mark = 'del' | 'ins';
 type Pair = { left: string; right: string };
 
 /** Renders blocks, and pairs of changed blocks, as HTML. */
+export interface DiffOptions {
+  /** Mark the changed parts of a formula (true), or the whole formula (false). */
+  formulaParts: boolean;
+}
+
 class PairRenderer {
-  constructor(readonly b: BlockBuilder) {}
+  constructor(
+    readonly b: BlockBuilder,
+    readonly options: DiffOptions,
+  ) {}
 
   plain(block: Block): string {
     if (block.html !== undefined) return wrapClass(block.html, block.cls);
@@ -139,9 +43,11 @@ class PairRenderer {
     switch (a.kind) {
       case 'leaf': {
         if (similarity(a.text, b.text) < MIN_WORD_DIFF_SIMILARITY) return this.whole(a, b);
-        const { left, right } = diffInline(this.b, a.inline, b.inline);
+        const { left, right } = diffInline(this.b, a.inline, b.inline, this.options.formulaParts);
         return { left: this.leaf(a, left), right: this.leaf(b, right) };
       }
+      case 'math':
+        return this.math(a, b);
       case 'code':
         return this.code(a, b);
       case 'table':
@@ -194,6 +100,15 @@ class PairRenderer {
     return wrapClass(html, block.cls);
   }
 
+  private math(a: Block, b: Block): Pair {
+    const d = this.options.formulaParts ? diffFormula(a.tokens[0].content, b.tokens[0].content, true) : undefined;
+    if (!d) return this.whole(a, b);
+    return {
+      left: `<div class="m-del"><p class="katex-block">${d.left}</p></div>\n`,
+      right: `<div class="m-ins"><p class="katex-block">${d.right}</p></div>\n`,
+    };
+  }
+
   private code(a: Block, b: Block): Pair {
     const esc = this.b.md.utils.escapeHtml;
     const lines = (blk: Block) => blk.tokens[0].content.replace(/\n$/, '').split('\n');
@@ -241,7 +156,7 @@ class PairRenderer {
         for (let k = 0; k < n; k++) {
           const ca = op.a.cells[k];
           const cb = op.b.cells[k];
-          const d = diffInline(this.b, ca?.inline, cb?.inline);
+          const d = diffInline(this.b, ca?.inline, cb?.inline, this.options.formulaParts);
           if (ca) cellsA.push(cell(ca.tag, ca.style, d.left));
           if (cb) cellsB.push(cell(cb.tag, cb.style, d.right));
         }
@@ -322,13 +237,13 @@ export interface DiffResult {
 }
 
 /** Diffs two Markdown sources and returns the rows of the side-by-side view. */
-export function diffMarkdown(md: MarkdownIt, oldSource: string, newSource: string): DiffResult {
+export function diffMarkdown(md: MarkdownIt, oldSource: string, newSource: string, options: DiffOptions = { formulaParts: true }): DiffResult {
   const docA = parseDoc(md, oldSource);
   const docB = parseDoc(md, newSource);
   const builderA = new BlockBuilder(md, docA.env);
   const builderB = new BlockBuilder(md, docB.env);
   // Link references resolve at parse time, so one renderer serves both sides.
-  const render = new PairRenderer(builderB);
+  const render = new PairRenderer(builderB, options);
   const ops = align(toUnits(builderA.documentBlocks(docA)), toUnits(builderB.documentBlocks(docB)));
 
   const result: DiffResult = { html: '', hunks: 0, added: 0, removed: 0, changed: 0 };

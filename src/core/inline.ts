@@ -1,5 +1,6 @@
 import { diffArrays } from 'diff';
 import type { BlockBuilder } from './blocks';
+import { diffFormula } from './formula';
 import type { Token } from './markdown';
 
 /**
@@ -12,9 +13,14 @@ interface Atom {
   /** The open tokens (strong, em, link ...) that contain this atom. */
   ctx: Token[];
   space: boolean;
+  /** The LaTeX source of a formula. */
+  math?: { tex: string; display: boolean };
 }
 
-export type Mark = 'del' | 'ins' | null;
+/** `m-del` and `m-ins` mark a formula whose changed parts are marked inside it. */
+export type Mark = 'del' | 'ins' | 'm-del' | 'm-ins' | null;
+
+const MARK_CLASS = { del: 'x-del', ins: 'x-ins', 'm-del': 'm-del', 'm-ins': 'm-ins' };
 
 const WORD = /\s+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu;
 
@@ -42,7 +48,14 @@ function atomize(builder: BlockBuilder, inline: Token): Atom[] {
       atoms.push({ key: `${ctxKey}| `, html: '\n', ctx, space: true });
     } else {
       const html = builder.renderInline([tok]);
-      atoms.push({ key: `${ctxKey}|${tok.type}:${tok.content}:${html}`, html, ctx, space: false });
+      const atom: Atom = { key: `${ctxKey}|${tok.type}:${tok.content}:${html}`, html, ctx, space: false };
+      if (tok.type === 'math_inline' || tok.type === 'math_inline_block') {
+        // The KaTeX plugin accepts $`…`$ as well as $…$.
+        const c = tok.content;
+        const tex = c.length > 2 && c.startsWith('`') && c.endsWith('`') ? c.slice(1, -1) : c;
+        atom.math = { tex, display: tok.type === 'math_inline_block' };
+      }
+      atoms.push(atom);
     }
   }
   return atoms;
@@ -65,7 +78,7 @@ function renderAtoms(atoms: Atom[], marks: Mark[]): string {
       open.push(tok);
     }
     const mark = marks[i];
-    html += mark ? `<span class="x-${mark}">${atom.html}</span>` : atom.html;
+    html += mark ? `<span class="${MARK_CLASS[mark]}">${atom.html}</span>` : atom.html;
   });
   closeTo(0);
   return html;
@@ -84,7 +97,12 @@ function escapeAttr(value: string): string {
  * Diffs the inline content of two blocks. Returns the HTML of each side, with removed atoms
  * marked on the old side and added atoms marked on the new side.
  */
-export function diffInline(builder: BlockBuilder, oldInline: Token | undefined, newInline: Token | undefined): { left: string; right: string } {
+export function diffInline(
+  builder: BlockBuilder,
+  oldInline: Token | undefined,
+  newInline: Token | undefined,
+  formulaParts = true,
+): { left: string; right: string } {
   const a = oldInline ? atomize(builder, oldInline) : [];
   const b = newInline ? atomize(builder, newInline) : [];
   const parts = diffArrays(
@@ -136,7 +154,44 @@ export function diffInline(builder: BlockBuilder, oldInline: Token | undefined, 
     }
   });
 
+  if (formulaParts) pairFormulas(segs, a, b, marksA, marksB);
   return { left: renderAtoms(a, marksA), right: renderAtoms(b, marksB) };
+}
+
+/**
+ * In each run of changes between two equal runs, pairs the removed and the added formulas
+ * in order, when both sides have the same number of them. A paired formula shows its
+ * changed parts instead of a mark on the whole formula.
+ */
+function pairFormulas(segs: { op: string; a: number; b: number; n: number }[], a: Atom[], b: Atom[], marksA: Mark[], marksB: Mark[]): void {
+  let k = 0;
+  while (k < segs.length) {
+    if (segs[k].op === 'eq') {
+      k++;
+      continue;
+    }
+    const mathA: number[] = [];
+    const mathB: number[] = [];
+    for (; k < segs.length && segs[k].op !== 'eq'; k++) {
+      const seg = segs[k];
+      if (seg.op === 'del') for (let i = seg.a; i < seg.a + seg.n; i++) if (a[i].math) mathA.push(i);
+      if (seg.op === 'ins') for (let i = seg.b; i < seg.b + seg.n; i++) if (b[i].math) mathB.push(i);
+    }
+    if (mathA.length === 0 || mathA.length !== mathB.length) continue;
+    mathA.forEach((ia, j) => {
+      const ib = mathB[j];
+      const x = a[ia].math!;
+      const y = b[ib].math!;
+      if (x.display !== y.display) return;
+      const d = diffFormula(x.tex, y.tex, x.display);
+      if (!d) return;
+      const wrap = (html: string) => (x.display ? `<p class="katex-block">${html}</p>` : html);
+      a[ia] = { ...a[ia], html: wrap(d.left) };
+      b[ib] = { ...b[ib], html: wrap(d.right) };
+      marksA[ia] = 'm-del';
+      marksB[ib] = 'm-ins';
+    });
+  }
 }
 
 function isFiller(atoms: Atom[]): boolean {

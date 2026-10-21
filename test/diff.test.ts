@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { align, diffMarkdown, similarity } from '../src/core/diff';
+import { align, similarity } from '../src/core/align';
+import { diffMarkdown } from '../src/core/diff';
+import { diffFormula } from '../src/core/formula';
 import { createMarkdown } from '../src/core/markdown';
 
 const md = createMarkdown();
@@ -48,21 +50,59 @@ describe('diffMarkdown', () => {
     expect(rows(r.html).every((x) => x.status === 'eq')).toBe(true);
   });
 
-  it('marks a changed block formula as one unit on each side', () => {
-    const r = diffMarkdown(md, '$$a + b$$\n', '$$a + c$$\n');
+  const whole = { formulaParts: false };
+
+  it('marks a changed block formula as one unit when formula parts are off', () => {
+    const r = diffMarkdown(md, '$$a + b$$\n', '$$a + c$$\n', whole);
     const [row] = rows(r.html);
     expect(row.status).toBe('chg');
     expect(row.left).toMatch(/^<div class="b-del"><p class="katex-block">/);
     expect(row.right).toMatch(/^<div class="b-ins"><p class="katex-block">/);
   });
 
-  it('marks a changed inline formula as one atom, not symbol by symbol', () => {
-    const r = diffMarkdown(md, 'Value $x_1 + y$ here.\n', 'Value $x_2 + y$ here.\n');
+  it('marks a changed inline formula as one atom when formula parts are off', () => {
+    const r = diffMarkdown(md, 'Value $x_1 + y$ here.\n', 'Value $x_2 + y$ here.\n', whole);
     const [row] = rows(r.html);
     expect(row.status).toBe('chg');
     expect(row.left.match(/class="x-del"/g)).toHaveLength(1);
     expect(row.right.match(/class="x-ins"/g)).toHaveLength(1);
     expect(row.right).toMatch(/<span class="x-ins"><span class="katex">/);
+  });
+
+  it('marks only the changed part of a block formula', () => {
+    const r = diffMarkdown(md, '$$\\frac{a}{b} + c$$\n', '$$\\frac{a}{d} + c$$\n');
+    const [row] = rows(r.html);
+    expect(row.left).toMatch(/^<div class="m-del"><p class="katex-block">/);
+    expect(row.left.match(/enclosing f-del/g)).toHaveLength(1);
+    expect(row.right.match(/enclosing f-ins/g)).toHaveLength(1);
+    // The mark holds the denominator only.
+    const marked = row.right.slice(row.right.indexOf('f-ins'));
+    expect(marked).toContain('>d<');
+    expect(marked.slice(0, 400)).not.toContain('>a<');
+  });
+
+  it('marks an added term at the end of a formula', () => {
+    const r = diffMarkdown(md, '$$\\mathcal{L} = \\sum_n x_n$$\n', '$$\\mathcal{L} = \\sum_n x_n + \\lambda w$$\n');
+    const [row] = rows(r.html);
+    expect(row.left).not.toContain('f-del');
+    expect(row.right.match(/enclosing f-ins/g)).toHaveLength(1);
+  });
+
+  it('marks a changed subscript, not the base', () => {
+    const r = diffMarkdown(md, 'Value $x_1 + y$ here.\n', 'Value $x_2 + y$ here.\n');
+    const [row] = rows(r.html);
+    expect(row.left).toContain('<span class="m-del"><span class="katex">');
+    expect(row.right).toContain('<span class="m-ins"><span class="katex">');
+    expect(row.right.match(/enclosing f-ins/g)).toHaveLength(1);
+    expect(row.right).not.toContain('x-ins');
+  });
+
+  it('keeps a whole mark when a formula cannot be marked part by part', () => {
+    // A mark inside \big( is not valid LaTeX, so the whole formula is marked.
+    const r = diffMarkdown(md, '$$\\big( a \\big)$$\n', '$$\\big[ a \\big]$$\n');
+    const [row] = rows(r.html);
+    expect(row.right).toMatch(/^<div class="(b-ins|m-ins)">/);
+    expect(row.right).not.toContain('katex-error');
   });
 
   it('marks changed words in a paragraph and keeps the other words plain', () => {
@@ -131,5 +171,17 @@ describe('diffMarkdown', () => {
     const r = diffMarkdown(md, src, src);
     expect(r.hunks).toBe(0);
     expect(r.html).not.toContain('katex-error');
+  });
+
+  it.skipIf(!sample || !existsSync(sample))('parses every formula of a large real document for the part diff', () => {
+    const tokens = md.parse(readFileSync(sample!, 'utf8'), {});
+    const formulas = tokens
+      .flatMap((t) => [t, ...(t.children ?? [])])
+      .filter((t) => t.type === 'math_block' || t.type === 'math_inline')
+      .map((t) => t.content);
+    expect(formulas.length).toBeGreaterThan(100);
+    // An added term must give a part diff for every formula, not the whole-formula fallback.
+    const failed = formulas.filter((tex) => !diffFormula(tex, `${tex} + \\zeta`, false));
+    expect(failed).toEqual([]);
   });
 });

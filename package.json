@@ -2,7 +2,7 @@
   "name": "mdiff",
   "displayName": "Markdown Rendered Diff",
   "description": "Shows the diff of a Markdown file as rendered output, next to the source diff.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "local",
   "license": "UNLICENSED",
   "private": true,
@@ -78,6 +78,19 @@
           "type": "boolean",
           "default": true,
           "description": "When a diff of a Markdown file opens (for example from the Source Control view), also open the rendered diff next to it."
+        },
+        "mdiff.formulaDiff": {
+          "type": "string",
+          "enum": [
+            "parts",
+            "whole"
+          ],
+          "enumDescriptions": [
+            "Mark only the changed parts of a formula, for example one subscript or one added term.",
+            "Mark the whole formula when any part of it changes."
+          ],
+          "default": "parts",
+          "description": "How a changed formula is marked in the rendered diff."
         }
       }
     }

@@ -27,6 +27,9 @@ export function activate(context: vscode.ExtensionContext): MdiffApi {
     controller,
     vscode.window.tabGroups.onDidChangeTabs((e) => controller.onTabsChanged(e)),
     vscode.workspace.onDidChangeTextDocument((e) => controller.onDocumentChanged(e.document)),
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('mdiff.formulaDiff')) controller.refresh();
+    }),
     vscode.commands.registerCommand('mdiff.showRenderedDiff', (uri?: vscode.Uri) => controller.showForActiveTab(uri)),
     vscode.commands.registerCommand('mdiff.openChange', (...states: unknown[]) => controller.openChange(states)),
     vscode.commands.registerCommand('mdiff.compareWithHead', (uri?: vscode.Uri) => controller.compareWithHead(uri)),
@@ -41,6 +44,10 @@ export function deactivate(): void {}
 
 function autoOpen(): boolean {
   return vscode.workspace.getConfiguration('mdiff').get<boolean>('autoOpen', true);
+}
+
+function formulaParts(): boolean {
+  return vscode.workspace.getConfiguration('mdiff').get<string>('formulaDiff', 'parts') === 'parts';
 }
 
 function isMarkdownDiff(input: unknown): input is vscode.TabInputTextDiff {
@@ -93,6 +100,11 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     if (uri !== pair.original.toString() && uri !== pair.modified.toString()) return;
     clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.render(false), 300);
+  }
+
+  /** Renders the current diff again, for example after a settings change. */
+  refresh(): void {
+    if (this.pair && this.panel) void this.render(false);
   }
 
   /** Command: show the rendered diff for the active diff tab, or for a Markdown file against HEAD. */
@@ -206,7 +218,7 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     const base = { type: 'update' as const, title: pair.title, labelA: describe(pair.original), labelB: describe(pair.modified), reset };
     try {
       const [a, b] = await Promise.all([readText(pair.original), readText(pair.modified)]);
-      message = { ...base, ...diffMarkdown(this.md, a, b) };
+      message = { ...base, ...diffMarkdown(this.md, a, b, { formulaParts: formulaParts() }) };
     } catch (error) {
       message = { ...base, html: '', hunks: 0, added: 0, removed: 0, changed: 0, error: `Cannot render the diff: ${String(error)}` };
     }

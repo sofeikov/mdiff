@@ -116,6 +116,15 @@ body.only .fold {
 .b-ins { background: var(--ins-text); }
 div.b-del, div.b-ins { border-radius: 3px; }
 li.b-del, li.b-ins, p.b-del, p.b-ins { border-radius: 3px; }
+/* A formula with marks on its changed parts */
+.m-del, .m-ins { border-radius: 3px; }
+div.m-del { background: var(--del-line); }
+div.m-ins { background: var(--ins-line); }
+span.m-del, span.m-ins { padding: 0 1px; }
+span.m-del { box-shadow: 0 0 0 1px var(--del-text); }
+span.m-ins { box-shadow: 0 0 0 1px var(--ins-text); }
+.katex .f-del { background: var(--del-text); border-radius: 2px; box-shadow: 0 0 0 1px var(--del-bar); }
+.katex .f-ins { background: var(--ins-text); border-radius: 2px; box-shadow: 0 0 0 1px var(--ins-bar); }
 tr.r-del > * { background: var(--del-text); }
 tr.r-ins > * { background: var(--ins-text); }
 tr.r-ph > td { padding: 0; height: 1.6em; background: repeating-linear-gradient(-45deg, transparent 0 6px, var(--code-bg) 6px 8px); }
