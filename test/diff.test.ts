@@ -112,6 +112,13 @@ describe('diffMarkdown', () => {
     expect(row.right).toBe('<p>The quick <span class="x-ins">red</span> fox jumps.</p>\n');
   });
 
+  it('treats a decimal number as one word', () => {
+    const r = diffMarkdown(md, 'The rate is 0.9 here.\n', 'The rate is 0.99 here.\n');
+    const [row] = rows(r.html);
+    expect(row.left).toContain('<span class="x-del">0.9</span>');
+    expect(row.right).toContain('<span class="x-ins">0.99</span>');
+  });
+
   it('joins the highlight across one space between two changed words', () => {
     const r = diffMarkdown(md, 'Keep alpha beta keep.\n', 'Keep gamma delta keep.\n');
     const [row] = rows(r.html);

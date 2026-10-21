@@ -97,6 +97,8 @@
     let k = -1;
     rows.forEach((x, i) => { if (x.r[0] <= line) k = i; });
     if (k < 0) return rows.length ? rows[0].top : 0;
+    // Several rows can map to the same lines, for example the front matter fields. Use the first.
+    while (k > 0 && rows[k - 1].r[0] === rows[k].r[0]) k--;
     const cur = rows[k];
     if (line < cur.r[1]) return cur.top + ((line - cur.r[0]) / (cur.r[1] - cur.r[0])) * cur.height;
     // The line is in the gap after this block, for example a blank line.
@@ -197,8 +199,12 @@
     if (!msg) return;
     if (msg.type === 'update') update(msg);
     else if (msg.type === 'scroll') scrollToLine(msg.line);
-    // Only the integration tests send this: a scroll as if the reader made it.
-    else if (msg.type === 'testScroll') window.scrollTo(0, msg.y);
+    // Only the tests send this: a scroll as if the reader made it, to an offset or to the
+    // first row that contains a text.
+    else if (msg.type === 'testScroll') {
+      const row = msg.text && [...content.querySelectorAll('.row')].find((r) => r.textContent.includes(msg.text));
+      window.scrollTo(0, row ? row.getBoundingClientRect().top + window.scrollY - headerHeight() : msg.y);
+    }
   });
 
   setOnly(!!state.only);

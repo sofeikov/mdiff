@@ -22,7 +22,7 @@ export type Mark = 'del' | 'ins' | 'm-del' | 'm-ins' | null;
 
 const MARK_CLASS = { del: 'x-del', ins: 'x-ins', 'm-del': 'm-del', 'm-ins': 'm-ins' };
 
-const WORD = /\s+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu;
+const WORD = /\s+|\p{N}+(?:[.,]\p{N}+)+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu;
 
 function atomize(builder: BlockBuilder, inline: Token): Atom[] {
   const esc = builder.md.utils.escapeHtml;

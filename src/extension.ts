@@ -21,8 +21,8 @@ export interface MdiffApi {
   readonly lastRendered: { rows: number; grid: boolean; katexFont: string } | undefined;
   /** The scroll offset of the webview after the last scroll from the editor. */
   readonly lastSynced: number | undefined;
-  /** Sends a scroll to the webview as if the reader made it. Only for the tests. */
-  testScroll(y: number): void;
+  /** Sends a scroll to the webview as if the reader made it: to an offset, or to the first row with a text. Only for the tests. */
+  testScroll(to: number | string): void;
 }
 
 export function activate(context: vscode.ExtensionContext): MdiffApi {
@@ -137,8 +137,8 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     }
   }
 
-  testScroll(y: number): void {
-    void this.panel?.webview.postMessage({ type: 'testScroll', y });
+  testScroll(to: number | string): void {
+    void this.panel?.webview.postMessage(typeof to === 'number' ? { type: 'testScroll', y: to } : { type: 'testScroll', text: to });
   }
 
   /** Renders the current diff again, for example after a settings change. */

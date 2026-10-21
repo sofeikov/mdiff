@@ -2,7 +2,7 @@
   "name": "mdiff",
   "displayName": "Markdown Rendered Diff",
   "description": "Shows the diff of a Markdown file as rendered output, next to the source diff.",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "publisher": "KonstantinSofeikov",
   "license": "MIT",
   "repository": {
@@ -114,7 +114,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "package": "npm run build && vsce package --no-dependencies -o mdiff.vsix",
-    "test:integration": "npm run build && node scripts/integration.mjs"
+    "test:integration": "npm run build && node scripts/integration.mjs",
+    "screenshots": "npm run build && node scripts/screenshots.mjs"
   },
   "dependencies": {
     "@vscode/markdown-it-katex": "1.1.2",
@@ -135,5 +136,13 @@
   },
   "overrides": {
     "katex": "$katex"
-  }
+  },
+  "keywords": [
+    "markdown",
+    "diff",
+    "git",
+    "katex",
+    "math",
+    "review"
+  ]
 }
