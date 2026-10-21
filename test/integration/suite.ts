@@ -28,7 +28,7 @@ export async function run(): Promise<void> {
 }
 
 async function steps(): Promise<void> {
-  const api = (await vscode.extensions.getExtension('local.mdiff')!.activate()) as MdiffApi;
+  const api = (await vscode.extensions.getExtension('KonstantinSofeikov.mdiff')!.activate()) as MdiffApi;
   const git = vscode.extensions.getExtension('vscode.git')!;
   await git.activate();
   const gitApi = git.exports.getAPI(1);

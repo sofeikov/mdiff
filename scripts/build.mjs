@@ -16,6 +16,9 @@ const common = {
   target: 'node20',
   sourcemap: true,
   logLevel: 'info',
+  // The KaTeX plugin loads katex.js with require, and the formula diff loads katex with import,
+  // which resolves to katex.mjs. Use one file for both, so that the bundle has one copy.
+  alias: { katex: './node_modules/katex/dist/katex.js' },
 };
 
 const contexts = await Promise.all([

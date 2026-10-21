@@ -2,8 +2,8 @@
   "name": "mdiff",
   "displayName": "Markdown Rendered Diff",
   "description": "Shows the diff of a Markdown file as rendered output, next to the source diff.",
-  "version": "0.3.0",
-  "publisher": "local",
+  "version": "0.3.1",
+  "publisher": "KonstantinSofeikov",
   "license": "UNLICENSED",
   "private": true,
   "engines": {
@@ -111,8 +111,8 @@
   "dependencies": {
     "@vscode/markdown-it-katex": "1.1.2",
     "diff": "9.0.0",
-    "js-yaml": "4.1.0",
-    "katex": "0.16.25",
+    "js-yaml": "4.3.2",
+    "katex": "0.19.0",
     "markdown-it": "15.0.3"
   },
   "devDependencies": {
@@ -120,9 +120,12 @@
     "@types/markdown-it": "14.2.0",
     "@types/node": "22.20.5",
     "@types/vscode": "1.100.0",
-    "@vscode/vsce": "3.9.2",
+    "@vscode/vsce": "4.0.0",
     "esbuild": "0.28.2",
     "typescript": "7.0.2",
     "vitest": "5.0.5"
+  },
+  "overrides": {
+    "katex": "$katex"
   }
 }
