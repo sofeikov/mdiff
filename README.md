@@ -100,6 +100,42 @@ The diff core is in `src/core/` and does not use the VS Code API:
 - Mermaid diagrams and syntax highlighting of code blocks are not supported.
 - A rewritten paragraph that has few words in common with the old one shows as a whole-block change.
 
+## Changelog
+
+### 0.4.2
+- Rendering is 1.75x to 4.9x faster on large documents. On a 611-line document with 331 formulas, a first render takes 94 ms, not 164 ms, and a live update 67 ms, not 160 ms. Each formula is now rendered once and kept.
+- `npm run bench` compares the speed of two versions, with a 95% confidence interval.
+
+### 0.4.1
+- The package is 418 KB, not 1.06 MB: only the `woff2` KaTeX fonts are included, and the bundle is minified.
+
+### 0.4.0
+- Screenshots in the README.
+- Fix: at the top of the file, the synced scroll showed the subtitle at the top, not the title.
+- A decimal number, such as `0.99`, is one word in the word diff.
+
+### 0.3.3
+- Repository, homepage and issue links to GitHub.
+
+### 0.3.2
+- MIT license.
+
+### 0.3.1
+- Publisher `KonstantinSofeikov`. The extension ID is `KonstantinSofeikov.mdiff`.
+- One KaTeX copy in the bundle, not two: 1.44 MB to 1.0 MB.
+- Updated packages with security advisories: `js-yaml` 4.3.2, KaTeX 0.19.0, `@vscode/vsce` 4.0.0. `npm audit` finds 0 vulnerabilities.
+
+### 0.3.0
+- Synced scrolling between the source diff editor and the rendered diff, in both directions. Setting: `mdiff.scrollSync`.
+
+### 0.2.0
+- Formula diff: only the changed parts of a formula are marked. Setting: `mdiff.formulaDiff`.
+
+### 0.1.0
+- First version. The rendered diff opens next to the source diff when you click a Markdown file in the Source Control view.
+- Block alignment, word diff, table cell diff, list items as rows, line diff for code, and front matter.
+- A changed formula is marked as a whole.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
