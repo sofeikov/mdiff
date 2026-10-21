@@ -2,9 +2,9 @@
   "name": "mdiff",
   "displayName": "Markdown Rendered Diff",
   "description": "Shows the diff of a Markdown file as rendered output, next to the source diff.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "KonstantinSofeikov",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": true,
   "engines": {
     "vscode": "^1.100.0"
@@ -105,7 +105,7 @@
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository --skip-license -o mdiff.vsix",
+    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository -o mdiff.vsix",
     "test:integration": "npm run build && node scripts/integration.mjs"
   },
   "dependencies": {

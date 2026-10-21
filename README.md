@@ -70,3 +70,7 @@ The diff core is in `src/core/` and does not use the VS Code API:
 - Images with relative paths do not show.
 - Mermaid diagrams and syntax highlighting of code blocks are not supported.
 - A rewritten paragraph that has few words in common with the old one shows as a whole-block change.
+
+## License
+
+MIT. See the LICENSE file.
