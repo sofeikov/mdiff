@@ -1,0 +1,110 @@
+{
+  "name": "mdiff",
+  "displayName": "Markdown Rendered Diff",
+  "description": "Shows the diff of a Markdown file as rendered output, next to the source diff.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "mdiff.showRenderedDiff",
+        "title": "Show Rendered Diff",
+        "category": "Markdown Rendered Diff",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "mdiff.openChange",
+        "title": "Open Changes with Rendered Diff",
+        "category": "Markdown Rendered Diff"
+      },
+      {
+        "command": "mdiff.compareWithHead",
+        "title": "Rendered Diff with HEAD",
+        "category": "Markdown Rendered Diff"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "mdiff.showRenderedDiff",
+          "when": "isInDiffEditor && resourceLangId == markdown",
+          "group": "navigation"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "mdiff.compareWithHead",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.(md|markdown|mdown|mkd|mkdn)$/i",
+          "group": "mdiff"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "mdiff.compareWithHead",
+          "when": "resourceScheme == file && resourceExtname =~ /^\\.(md|markdown|mdown|mkd|mkdn)$/i",
+          "group": "3_compare"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "mdiff.openChange",
+          "when": "scmProvider == git && resourceExtname =~ /^\\.(md|markdown|mdown|mkd|mkdn)$/i",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "mdiff.openChange",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Markdown Rendered Diff",
+      "properties": {
+        "mdiff.autoOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "When a diff of a Markdown file opens (for example from the Source Control view), also open the rendered diff next to it."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository --skip-license -o mdiff.vsix",
+    "test:integration": "npm run build && node scripts/integration.mjs"
+  },
+  "dependencies": {
+    "@vscode/markdown-it-katex": "1.1.2",
+    "diff": "9.0.0",
+    "js-yaml": "4.1.0",
+    "katex": "0.16.25",
+    "markdown-it": "15.0.3"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "4.0.9",
+    "@types/markdown-it": "14.2.0",
+    "@types/node": "22.20.5",
+    "@types/vscode": "1.100.0",
+    "@vscode/vsce": "3.9.2",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}

@@ -1,0 +1,168 @@
+:root {
+  --bg: var(--vscode-editor-background, #ffffff);
+  --fg: var(--vscode-editor-foreground, #1f2328);
+  --muted: var(--vscode-descriptionForeground, #656d76);
+  --border: var(--vscode-panel-border, #d0d7de);
+  --link: var(--vscode-textLink-foreground, #0969da);
+  --code-bg: var(--vscode-textCodeBlock-background, rgba(175, 184, 193, 0.2));
+  --del-text: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.25));
+  --ins-text: var(--vscode-diffEditor-insertedTextBackground, rgba(0, 170, 0, 0.25));
+  --del-line: var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.1));
+  --ins-line: var(--vscode-diffEditor-insertedLineBackground, rgba(0, 170, 0, 0.1));
+  --del-bar: var(--vscode-editorGutter-deletedBackground, #e5534b);
+  --ins-bar: var(--vscode-editorGutter-addedBackground, #2da44e);
+  --chg-bar: var(--vscode-editorGutter-modifiedBackground, #1b81e5);
+  --focus: var(--vscode-focusBorder, #0969da);
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body {
+  font-family: var(--markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, "Ubuntu", "Droid Sans", sans-serif);
+  font-size: var(--markdown-font-size, 14px);
+  line-height: var(--markdown-line-height, 1.6);
+}
+
+/* Toolbar and column labels */
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 6px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.bar .file { font-weight: 600; }
+.bar .stats { color: var(--muted); }
+.bar .tools { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.bar button {
+  font: inherit;
+  color: var(--vscode-button-secondaryForeground, var(--fg));
+  background: var(--vscode-button-secondaryBackground, transparent);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+.bar button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--code-bg)); }
+.bar label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.labels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.labels .cell { padding: 4px 16px; }
+.labels .cell.a { border-right: 1px solid var(--border); }
+
+.error { padding: 16px; color: var(--vscode-errorForeground, #d1242f); white-space: pre-wrap; }
+.empty { padding: 16px; color: var(--muted); }
+
+/* Rows: one grid per row, so the two columns line up block by block */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.row .cell {
+  padding: 0 16px;
+  min-width: 0;
+  overflow-x: auto;
+  border-left: 3px solid transparent;
+}
+.row .cell.a { border-right: 1px solid var(--border); }
+.row.chg .cell { border-left-color: var(--chg-bar); }
+.row.del .cell.a { border-left-color: var(--del-bar); background: var(--del-line); }
+.row.ins .cell.b { border-left-color: var(--ins-bar); background: var(--ins-line); }
+.row.cur .cell { box-shadow: inset 0 1px 0 var(--focus), inset 0 -1px 0 var(--focus); }
+.ph {
+  height: 100%;
+  min-height: 1em;
+  background: repeating-linear-gradient(-45deg, transparent 0 6px, var(--code-bg) 6px 8px);
+}
+.row.del .cell.b, .row.ins .cell.a { padding: 0; overflow: hidden; }
+/* A whole added or removed row already has a background; do not colour its block again. */
+.row.del .cell.a > .b-del, .row.ins .cell.b > .b-ins,
+.row.del .cell.a > ul > .b-del, .row.del .cell.a > ol > .b-del,
+.row.ins .cell.b > ul > .b-ins, .row.ins .cell.b > ol > .b-ins { background: none; }
+
+/* "Only changes" view */
+.fold { display: none; }
+body.only .row.far { display: none; }
+body.only .fold {
+  display: block;
+  padding: 2px 16px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--code-bg);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Changes inside blocks */
+.x-del { background: var(--del-text); text-decoration: line-through; text-decoration-color: var(--del-bar); }
+.x-ins { background: var(--ins-text); }
+.b-del { background: var(--del-text); }
+.b-ins { background: var(--ins-text); }
+div.b-del, div.b-ins { border-radius: 3px; }
+li.b-del, li.b-ins, p.b-del, p.b-ins { border-radius: 3px; }
+tr.r-del > * { background: var(--del-text); }
+tr.r-ins > * { background: var(--ins-text); }
+tr.r-ph > td { padding: 0; height: 1.6em; background: repeating-linear-gradient(-45deg, transparent 0 6px, var(--code-bg) 6px 8px); }
+.code-diff > code > span { display: block; min-height: 1.2em; white-space: pre; }
+.code-diff .l-del { background: var(--del-text); }
+.code-diff .l-ins { background: var(--ins-text); }
+
+/* Markdown content, close to the built-in preview */
+.cell h1, .cell h2, .cell h3, .cell h4, .cell h5, .cell h6 { font-weight: 600; margin: 24px 0 12px; line-height: 1.25; }
+.cell h1 { font-size: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+.cell h2 { font-size: 1.5em; padding-bottom: 0.3em; border-bottom: 1px solid var(--border); }
+.cell h3 { font-size: 1.25em; }
+.cell p, .cell ul, .cell ol, .cell table, .cell pre, .cell blockquote { margin: 0 0 12px; }
+.row > .cell > :first-child { margin-top: 12px; }
+/* Each item of a top-level list is its own row; keep the items close together. */
+.row > .cell > ul.unit, .row > .cell > ol.unit { margin: 4px 0; }
+.row > .cell > ul.unit > li > :last-child, .row > .cell > ol.unit > li > :last-child { margin-bottom: 0; }
+.cell ul, .cell ol { padding-left: 2em; }
+.cell li > p { margin: 0 0 6px; }
+.cell li + li { margin-top: 2px; }
+.cell a { color: var(--link); text-decoration: none; }
+.cell a:hover { text-decoration: underline; }
+.cell code {
+  font-family: var(--vscode-editor-font-family, "SF Mono", Monaco, Menlo, Consolas, "Ubuntu Mono", monospace);
+  font-size: 0.9em;
+  background: var(--code-bg);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+.cell pre { background: var(--code-bg); padding: 12px; border-radius: 3px; overflow-x: auto; }
+.cell pre code { background: none; padding: 0; }
+.cell blockquote { margin-left: 0; padding: 0 12px; border-left: 4px solid var(--border); color: var(--muted); }
+.cell table { border-collapse: collapse; display: block; overflow-x: auto; }
+.cell th, .cell td { border: 1px solid var(--border); padding: 4px 10px; vertical-align: top; }
+.cell th { font-weight: 600; }
+.cell hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+.cell img { max-width: 100%; }
+.cell .katex-display, .cell .katex-block { overflow-x: auto; overflow-y: hidden; padding: 4px 0; margin: 8px 0; }
+.cell .katex-block .katex-display { margin: 0; }
+.cell .katex-error { color: var(--vscode-errorForeground, #d1242f); }
+
+/* Front matter */
+.cell .fm-title { border-bottom: none; margin-bottom: 4px; }
+.cell .fm-subtitle { font-size: 1.25em; color: var(--muted); margin-top: 0; }
+.cell .fm-author, .cell .fm-date { color: var(--muted); margin: 0 0 4px; }
+.cell .fm-abstract-label { font-weight: 600; margin: 16px 0 4px; }
+.cell .fm-abstract { font-size: 0.95em; padding-left: 12px; border-left: 3px solid var(--border); }
+.cell .fm-abstract > p:first-child { margin-top: 0; }
+.cell table.fm-meta { font-size: 12px; }
+.cell .fm-error { color: var(--vscode-errorForeground, #d1242f); }
