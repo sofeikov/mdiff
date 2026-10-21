@@ -18,7 +18,7 @@ export interface MdiffApi {
   readonly lastMessage: UpdateMessage | undefined;
   readonly panelVisible: boolean;
   /** What the webview reported after it showed the last update. */
-  readonly lastRendered: { rows: number; grid: boolean; katexFont: string } | undefined;
+  readonly lastRendered: { rows: number; grid: boolean; katexFont: string; fonts: string[] } | undefined;
   /** The scroll offset of the webview after the last scroll from the editor. */
   readonly lastSynced: number | undefined;
   /** Sends a scroll to the webview as if the reader made it: to an offset, or to the first row with a text. Only for the tests. */
@@ -233,7 +233,7 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     if (editor) this.onEditorScrolled(editor);
   }
 
-  private onMessage(msg: { type: string; href?: string; rows?: number; grid?: boolean; katexFont?: string; line?: number; top?: number }): void {
+  private onMessage(msg: { type: string; href?: string; rows?: number; grid?: boolean; katexFont?: string; fonts?: string[]; line?: number; top?: number }): void {
     if (msg.type === 'ready') {
       this.ready = true;
       if (this.queued) {
@@ -246,7 +246,7 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     } else if (msg.type === 'synced') {
       this.lastSynced = msg.top;
     } else if (msg.type === 'rendered') {
-      this.lastRendered = { rows: msg.rows ?? 0, grid: !!msg.grid, katexFont: msg.katexFont ?? '' };
+      this.lastRendered = { rows: msg.rows ?? 0, grid: !!msg.grid, katexFont: msg.katexFont ?? '', fonts: msg.fonts ?? [] };
     } else if (msg.type === 'open' && msg.href) {
       void this.openLink(msg.href);
     }

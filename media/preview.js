@@ -168,11 +168,14 @@
       // Facts about the page for the integration tests.
       const row = content.querySelector('.row');
       const katex = content.querySelector('.katex');
-      vscode.postMessage({
-        type: 'rendered',
-        rows: content.querySelectorAll('.row').length,
-        grid: row ? getComputedStyle(row).display === 'grid' : false,
-        katexFont: katex ? getComputedStyle(katex).fontFamily : '',
+      document.fonts.ready.then(() => {
+        vscode.postMessage({
+          type: 'rendered',
+          rows: content.querySelectorAll('.row').length,
+          grid: row ? getComputedStyle(row).display === 'grid' : false,
+          katexFont: katex ? getComputedStyle(katex).fontFamily : '',
+          fonts: [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family),
+        });
       });
     }
   }

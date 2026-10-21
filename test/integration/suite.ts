@@ -47,6 +47,7 @@ async function steps(): Promise<void> {
   assert.ok(page.rows > 10, `the page has rows (${page.rows})`);
   assert.ok(page.grid, 'preview.css is loaded');
   assert.match(page.katexFont, /KaTeX/, 'katex.min.css is loaded');
+  assert.ok(page.fonts.includes('KaTeX_Main') && page.fonts.includes('KaTeX_Math'), `the KaTeX fonts are loaded (${page.fonts.join(', ')})`);
   console.log('MDIFF INTEGRATION: webview', JSON.stringify(page));
 
   const diffTab = tabs().find(({ t }) => t.input instanceof vscode.TabInputTextDiff);

@@ -1,13 +1,17 @@
 // Bundles the extension and the preview CLI, and copies the KaTeX assets.
 import * as esbuild from 'esbuild';
-import { cpSync, mkdirSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 
 const watch = process.argv.includes('--watch');
 
+// The webview loads the woff2 fonts, so the woff and ttf copies are left out of the package.
 rmSync('media/katex', { recursive: true, force: true });
-mkdirSync('media/katex', { recursive: true });
-cpSync('node_modules/katex/dist/katex.min.css', 'media/katex/katex.min.css');
-cpSync('node_modules/katex/dist/fonts', 'media/katex/fonts', { recursive: true });
+mkdirSync('media/katex/fonts', { recursive: true });
+const css = readFileSync('node_modules/katex/dist/katex.min.css', 'utf8').replace(/,url\([^)]+\.(woff|ttf)\) format\("(woff|truetype)"\)/g, '');
+writeFileSync('media/katex/katex.min.css', css);
+for (const font of readdirSync('node_modules/katex/dist/fonts').filter((f) => f.endsWith('.woff2'))) {
+  copyFileSync(`node_modules/katex/dist/fonts/${font}`, `media/katex/fonts/${font}`);
+}
 
 const common = {
   bundle: true,
@@ -22,7 +26,7 @@ const common = {
 };
 
 const contexts = await Promise.all([
-  esbuild.context({ ...common, entryPoints: ['src/extension.ts'], outfile: 'dist/extension.js', external: ['vscode'] }),
+  esbuild.context({ ...common, entryPoints: ['src/extension.ts'], outfile: 'dist/extension.js', external: ['vscode'], minify: !watch }),
   esbuild.context({ ...common, entryPoints: ['src/cli.ts'], outfile: 'dist/cli.js' }),
 ]);
 
