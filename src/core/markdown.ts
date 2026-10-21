@@ -1,14 +1,39 @@
 import markdownIt from 'markdown-it';
 import type { MarkdownIt, Token } from 'markdown-it';
 import katexPlugin from '@vscode/markdown-it-katex';
+import katex from 'katex';
 import yaml from 'js-yaml';
 
 export type { Token };
 
-/** Creates a parser with the same math settings as the built-in VS Code preview. */
+/** The most formulas that one parser keeps rendered. */
+const FORMULA_CACHE_SIZE = 5000;
+
+/**
+ * Creates a parser with the same math settings as the built-in VS Code preview.
+ *
+ * The parser keeps the HTML of each formula that it renders. A diff renders the same formula
+ * several times (for the block keys and for the output), and a live update renders the
+ * unchanged formulas again, so the cache saves most of the KaTeX work.
+ */
 export function createMarkdown(): MarkdownIt {
   const md = new markdownIt({ html: true, linkify: true });
-  const katexOptions = { enableBareBlocks: true, enableFencedBlocks: true, strict: 'ignore' };
+  const cache = new Map<string, string>();
+  const cachedKatex = {
+    ...katex,
+    renderToString(tex: string, options?: katex.KatexOptions): string {
+      const key = `${options?.displayMode ? 'D' : 'I'}${tex}`;
+      let html = cache.get(key);
+      if (html === undefined) {
+        // An error is not kept: the plugin catches it and renders an error message.
+        html = katex.renderToString(tex, options);
+        if (cache.size >= FORMULA_CACHE_SIZE) cache.clear();
+        cache.set(key, html);
+      }
+      return html;
+    },
+  };
+  const katexOptions = { enableBareBlocks: true, enableFencedBlocks: true, strict: 'ignore', katex: cachedKatex };
   katexPlugin(md, katexOptions as Parameters<typeof katexPlugin>[1]);
   return md;
 }

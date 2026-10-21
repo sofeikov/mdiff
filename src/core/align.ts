@@ -53,10 +53,16 @@ function pairGap<T extends Alignable>(a: T[], b: T[]): Op<T>[] {
   // so that a rewritten paragraph shows on the same row as the old one.
   const n = a.length;
   const m = b.length;
-  const score = (i: number, j: number) => {
-    if (a[i].type !== b[j].type) return -1;
-    return Math.max(similarity(a[i].text, b[j].text), 0.01);
-  };
+  // Split each text into words once, and compute each score once.
+  const bagsA = a.map((x) => wordBag(x.text));
+  const bagsB = b.map((x) => wordBag(x.text));
+  const scores = new Float64Array(n * m);
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < m; j++) {
+      scores[i * m + j] = a[i].type !== b[j].type ? -1 : Math.max(bagSimilarity(bagsA[i], bagsB[j]), 0.01);
+    }
+  }
+  const score = (i: number, j: number) => scores[i * m + j];
   const s: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
@@ -87,21 +93,29 @@ function pairGap<T extends Alignable>(a: T[], b: T[]): Op<T>[] {
   return out.reverse();
 }
 
-/** Dice coefficient of the word multisets. */
-export function similarity(x: string, y: string): number {
-  const words = (s: string) => s.toLowerCase().match(/[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu) ?? [];
-  const wx = words(x);
-  const wy = words(y);
-  if (wx.length === 0 && wy.length === 0) return 1;
+/** The words of a text with their counts. */
+interface WordBag {
+  counts: Map<string, number>;
+  size: number;
+}
+
+function wordBag(text: string): WordBag {
   const counts = new Map<string, number>();
-  for (const w of wx) counts.set(w, (counts.get(w) ?? 0) + 1);
+  const words = text.toLowerCase().match(/[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu) ?? [];
+  for (const w of words) counts.set(w, (counts.get(w) ?? 0) + 1);
+  return { counts, size: words.length };
+}
+
+/** Dice coefficient of two word multisets. */
+function bagSimilarity(x: WordBag, y: WordBag): number {
+  if (x.size === 0 && y.size === 0) return 1;
+  const [small, large] = x.counts.size <= y.counts.size ? [x.counts, y.counts] : [y.counts, x.counts];
   let common = 0;
-  for (const w of wy) {
-    const c = counts.get(w) ?? 0;
-    if (c > 0) {
-      common++;
-      counts.set(w, c - 1);
-    }
-  }
-  return (2 * common) / (wx.length + wy.length);
+  for (const [w, c] of small) common += Math.min(c, large.get(w) ?? 0);
+  return (2 * common) / (x.size + y.size);
+}
+
+/** Dice coefficient of the word multisets of two texts. */
+export function similarity(x: string, y: string): number {
+  return bagSimilarity(wordBag(x), wordBag(y));
 }
