@@ -102,6 +102,9 @@ The diff core is in `src/core/` and does not use the VS Code API:
 
 ## Changelog
 
+### 0.4.3
+- A changelog in the README.
+
 ### 0.4.2
 - Rendering is 1.75x to 4.9x faster on large documents. On a 611-line document with 331 formulas, a first render takes 94 ms, not 164 ms, and a live update 67 ms, not 160 ms. Each formula is now rendered once and kept.
 - `npm run bench` compares the speed of two versions, with a 95% confidence interval.
