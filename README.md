@@ -73,4 +73,4 @@ The diff core is in `src/core/` and does not use the VS Code API:
 
 ## License
 
-MIT. See the LICENSE file.
+MIT. See [LICENSE](LICENSE).
