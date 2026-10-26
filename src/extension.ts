@@ -1,10 +1,11 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { loadBibliography } from './bibliography';
 import { diffMarkdown } from './core/diff';
-import { createMarkdown } from './core/markdown';
-import { buildShell, UpdateMessage } from './core/page';
+import { createMarkdown, isQuartoPath } from './core/markdown';
+import { buildShell, toRowsMessage, UpdateMessage } from './core/page';
 
-const MARKDOWN_FILE = /\.(md|markdown|mdown|mkd|mkdn)$/i;
+const MARKDOWN_FILE = /\.(md|markdown|mdown|mkd|mkdn|qmd)$/i;
 
 interface DiffPair {
   original: vscode.Uri;
@@ -18,7 +19,7 @@ export interface MdiffApi {
   readonly lastMessage: UpdateMessage | undefined;
   readonly panelVisible: boolean;
   /** What the webview reported after it showed the last update. */
-  readonly lastRendered: { rows: number; grid: boolean; katexFont: string; fonts: string[] } | undefined;
+  readonly lastRendered: { rows: number; parsed: number; lastRow: string; grid: boolean; katexFont: string; fonts: string[] } | undefined;
   /** The scroll offset of the webview after the last scroll from the editor. */
   readonly lastSynced: number | undefined;
   /** Sends a scroll to the webview as if the reader made it: to an offset, or to the first row with a text. Only for the tests. */
@@ -68,6 +69,7 @@ function isMarkdownDiff(input: unknown): input is vscode.TabInputTextDiff {
 
 class RenderedDiffController implements MdiffApi, vscode.Disposable {
   private readonly md = createMarkdown();
+  private readonly qmd = createMarkdown({ quarto: true });
   private panel: vscode.WebviewPanel | undefined;
   private ready = false;
   private queued: UpdateMessage | undefined;
@@ -80,6 +82,9 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
   lastSynced: number | undefined;
   /** Until this time, editor scroll events come from a reveal by the extension. */
   private ignoreEditorUntil = 0;
+  /** The rows that the webview shows, as last posted, and their number. */
+  private shownRows: { seq: number; rows: string[] } | undefined;
+  private seq = 0;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -169,7 +174,7 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
   async compareWithHead(uri?: vscode.Uri): Promise<void> {
     const target = uri ?? vscode.window.activeTextEditor?.document.uri;
     if (!target || target.scheme !== 'file' || !MARKDOWN_FILE.test(target.path)) {
-      void vscode.window.showInformationMessage('Open a Markdown file from the workspace first.');
+      void vscode.window.showInformationMessage('Open a Markdown or Quarto file from the workspace first.');
       return;
     }
     // The same URI form that the built-in Git extension uses for a file at a ref.
@@ -218,6 +223,7 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     panel.webview.onDidReceiveMessage((msg) => this.onMessage(msg));
     panel.onDidDispose(() => {
       this.panel = undefined;
+      this.shownRows = undefined;
       this.pair = undefined;
       this.lastMessage = undefined;
       this.lastRendered = undefined;
@@ -233,20 +239,25 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     if (editor) this.onEditorScrolled(editor);
   }
 
-  private onMessage(msg: { type: string; href?: string; rows?: number; grid?: boolean; katexFont?: string; fonts?: string[]; line?: number; top?: number }): void {
+  private onMessage(msg: { type: string; href?: string; rows?: number; parsed?: number; lastRow?: string; grid?: boolean; katexFont?: string; fonts?: string[]; line?: number; top?: number }): void {
     if (msg.type === 'ready') {
       this.ready = true;
+      this.shownRows = undefined;
       if (this.queued) {
-        void this.panel?.webview.postMessage(this.queued);
+        this.post(this.queued);
         this.queued = undefined;
         this.syncFromEditor();
       }
+    } else if (msg.type === 'resync') {
+      // The webview does not have the rows that the last patch referred to: send all rows.
+      this.shownRows = undefined;
+      if (this.lastMessage) this.post(this.lastMessage);
     } else if (msg.type === 'reveal' && typeof msg.line === 'number') {
       this.revealInEditor(msg.line);
     } else if (msg.type === 'synced') {
       this.lastSynced = msg.top;
     } else if (msg.type === 'rendered') {
-      this.lastRendered = { rows: msg.rows ?? 0, grid: !!msg.grid, katexFont: msg.katexFont ?? '', fonts: msg.fonts ?? [] };
+      this.lastRendered = { rows: msg.rows ?? 0, parsed: msg.parsed ?? 0, lastRow: msg.lastRow ?? '', grid: !!msg.grid, katexFont: msg.katexFont ?? '', fonts: msg.fonts ?? [] };
     } else if (msg.type === 'open' && msg.href) {
       void this.openLink(msg.href);
     }
@@ -264,6 +275,13 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     await vscode.commands.executeCommand('vscode.open', target);
   }
 
+  private post(message: UpdateMessage): void {
+    if (!this.panel) return;
+    const wire = toRowsMessage(message, this.shownRows, ++this.seq);
+    this.shownRows = message.error ? undefined : { seq: wire.seq, rows: message.rows ?? [] };
+    void this.panel.webview.postMessage(wire);
+  }
+
   private async render(reset: boolean): Promise<void> {
     const pair = this.pair;
     if (!pair) return;
@@ -271,14 +289,17 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     const base = { type: 'update' as const, title: pair.title, labelA: describe(pair.original), labelB: describe(pair.modified), reset };
     try {
       const [a, b] = await Promise.all([readText(pair.original), readText(pair.modified)]);
-      message = { ...base, ...diffMarkdown(this.md, a, b, { formulaParts: formulaParts() }) };
+      const quarto = isQuartoPath(pair.original.path) || isQuartoPath(pair.modified.path);
+      // A Git URI has the path of the file in the working tree, so the bibliography next to it is found.
+      const bibliography = quarto ? loadBibliography(pair.modified.fsPath, b) : undefined;
+      message = { ...base, ...diffMarkdown(quarto ? this.qmd : this.md, a, b, { formulaParts: formulaParts(), bibliography }) };
     } catch (error) {
       message = { ...base, html: '', hunks: 0, added: 0, removed: 0, changed: 0, error: `Cannot render the diff: ${String(error)}` };
     }
     // A newer request replaced this one while the files were read.
     if (pair !== this.pair || !this.panel) return;
     this.lastMessage = message;
-    if (this.ready) void this.panel.webview.postMessage(message);
+    if (this.ready) this.post(message);
     else this.queued = message;
     if (reset) this.syncFromEditor();
   }

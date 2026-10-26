@@ -6,6 +6,12 @@
   const content = $('content');
   const only = $('only');
   let current = -1;
+  // The elements of the shown rows, in the order of the rows that the extension sent, and their number.
+  let rowEls = [];
+  let shownSeq;
+  // The number of rows that the last update parsed, for the tests.
+  let parsedRows = 0;
+  let fontsLoading = false;
 
   function setOnly(value) {
     only.checked = value;
@@ -39,9 +45,43 @@
     for (const r of content.querySelectorAll('.row.cur')) r.classList.remove('cur');
     const hunk = rows[current].dataset.hunk;
     for (const r of content.querySelectorAll(`.row[data-hunk="${hunk}"]`)) r.classList.add('cur');
-    const top = rows[current].getBoundingClientRect().top + window.scrollY - headerHeight() - 24;
-    window.scrollTo({ top, behavior: 'smooth' });
+    const target = rows[current];
+    const top = () => target.getBoundingClientRect().top + window.scrollY - headerHeight() - 24;
+    window.scrollTo({ top: top(), behavior: 'smooth' });
+    // Rows that were not laid out yet have an estimated height (content-visibility in
+    // preview.css). They get their real height as the view passes them, which moves the
+    // target: correct the position when the scroll ends.
+    pendingTarget = { top, until: Date.now() + 2000 };
     updatePos(rows.length);
+  }
+
+  let pendingTarget;
+  window.addEventListener('scrollend', () => {
+    const t = pendingTarget;
+    pendingTarget = undefined;
+    if (!t || Date.now() > t.until) return;
+    const top = t.top();
+    if (Math.abs(top - window.scrollY) > 2) window.scrollTo({ top, behavior: 'instant' });
+  });
+
+  /**
+   * Scrolls to the offset that `offset()` gives, and again two frames later. Rows that come into
+   * view are laid out then, and their real height can differ from the estimate. With `echo`,
+   * the scroll follows the editor, so it is not sent back to the editor.
+   */
+  let settleTimer = 0;
+  function scrollSettled(offset, echo, done) {
+    const go = () => {
+      if (echo) ignoreScrollUntil = Date.now() + 150;
+      window.scrollTo(0, Math.max(0, offset()));
+    };
+    go();
+    const token = ++settleTimer;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (token !== settleTimer) return;
+      go();
+      if (done) done();
+    }));
   }
 
   function step(dir) {
@@ -124,9 +164,11 @@
   }
 
   function scrollToLine(line) {
-    ignoreScrollUntil = Date.now() + 150;
-    window.scrollTo(0, Math.max(0, offsetOfLine(line) - headerHeight()));
-    if (vscode) vscode.postMessage({ type: 'synced', top: window.scrollY });
+    const synced = () => {
+      if (vscode) vscode.postMessage({ type: 'synced', top: window.scrollY });
+    };
+    scrollSettled(() => offsetOfLine(line) - headerHeight(), true, synced);
+    synced();
   }
 
   let scrollQueued = false;
@@ -139,6 +181,35 @@
     });
   });
 
+  /**
+   * Shows the rows of an update. A row is HTML, or the index of an equal row that is shown
+   * already: that element stays in the page, with its layout, and only the new rows are parsed.
+   */
+  function setRows(rows, patch) {
+    const old = patch ? rowEls : [];
+    const fresh = rows.filter((r) => typeof r === 'string');
+    const tpl = document.createElement('template');
+    tpl.innerHTML = fresh.join('');
+    const made = [...tpl.content.children];
+    parsedRows = made.length;
+    let k = 0;
+    const els = rows.map((r) => (typeof r === 'string' ? made[k++] : old[r]));
+    if (!patch) content.replaceChildren();
+    for (const n of content.querySelectorAll(':scope > .empty, :scope > .error')) n.remove();
+    // Insert or move only where the order differs, then remove the rows that are gone.
+    let cursor = content.firstChild;
+    for (const el of els) {
+      if (el === cursor) cursor = cursor.nextSibling;
+      else content.insertBefore(el, cursor);
+    }
+    while (cursor) {
+      const next = cursor.nextSibling;
+      cursor.remove();
+      cursor = next;
+    }
+    rowEls = els;
+  }
+
   function update(msg) {
     $('title').textContent = msg.title;
     $('label-a').textContent = msg.labelA;
@@ -148,17 +219,37 @@
     if (msg.added) parts.push(`${msg.added} added`);
     if (msg.removed) parts.push(`${msg.removed} removed`);
     $('stats').textContent = parts.length ? parts.join(', ') + ' blocks' : '';
+    if (msg.base !== undefined && msg.base !== shownSeq) {
+      // The patch refers to rows that this page does not have: ask for all rows.
+      if (vscode) vscode.postMessage({ type: 'resync' });
+      return;
+    }
     const y = window.scrollY;
     if (msg.error) {
-      content.innerHTML = '';
+      content.replaceChildren();
+      rowEls = [];
+      shownSeq = undefined;
       const div = document.createElement('div');
       div.className = 'error';
       div.textContent = msg.error;
       content.appendChild(div);
-    } else if (msg.hunks === 0) {
-      content.innerHTML = '<div class="empty">The rendered documents are the same.</div>' + msg.html;
     } else {
-      content.innerHTML = msg.html;
+      if (msg.rows) setRows(msg.rows, msg.base !== undefined);
+      else content.innerHTML = msg.html;
+      shownSeq = msg.seq;
+      if (msg.hunks === 0) {
+        const div = document.createElement('div');
+        div.className = 'empty';
+        div.textContent = 'The rendered documents are the same.';
+        content.prepend(div);
+      }
+    }
+    for (const r of content.querySelectorAll('.row.cur')) r.classList.remove('cur');
+    // Rows off screen are not laid out, so the browser would load the KaTeX fonts only when a
+    // formula scrolls into view, and show it in a fallback font first. Load the main ones now.
+    if (!fontsLoading && content.querySelector('.katex')) {
+      fontsLoading = true;
+      for (const font of ['1em KaTeX_Main', '1em KaTeX_Math']) document.fonts.load(font).catch(() => {});
     }
     current = -1;
     updatePos(msg.hunks);
@@ -172,6 +263,8 @@
         vscode.postMessage({
           type: 'rendered',
           rows: content.querySelectorAll('.row').length,
+          parsed: parsedRows,
+          lastRow: rowEls.length ? rowEls[rowEls.length - 1].textContent.slice(-200) : '',
           grid: row ? getComputedStyle(row).display === 'grid' : false,
           katexFont: katex ? getComputedStyle(katex).fontFamily : '',
           fonts: [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family),
@@ -206,7 +299,7 @@
     // first row that contains a text.
     else if (msg.type === 'testScroll') {
       const row = msg.text && [...content.querySelectorAll('.row')].find((r) => r.textContent.includes(msg.text));
-      window.scrollTo(0, row ? row.getBoundingClientRect().top + window.scrollY - headerHeight() : msg.y);
+      scrollSettled(() => (row ? row.getBoundingClientRect().top + window.scrollY - headerHeight() : msg.y), false);
     }
   });
 

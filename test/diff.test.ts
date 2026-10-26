@@ -5,6 +5,7 @@ import { align, similarity } from '../src/core/align';
 import { diffMarkdown } from '../src/core/diff';
 import { diffFormula } from '../src/core/formula';
 import { createMarkdown } from '../src/core/markdown';
+import { toRowsMessage, UpdateMessage } from '../src/core/page';
 
 const md = createMarkdown();
 const fixture = (name: string) => readFileSync(join(__dirname, 'fixtures', name), 'utf8');
@@ -190,5 +191,54 @@ describe('diffMarkdown', () => {
     // An added term must give a part diff for every formula, not the whole-formula fallback.
     const failed = formulas.filter((tex) => !diffFormula(tex, `${tex} + \\zeta`, false));
     expect(failed).toEqual([]);
+  });
+});
+
+describe('parsed side cache', () => {
+  it('gives the same result as a new parser, also when one side is reused', () => {
+    const a = fixture('old.md');
+    const b = fixture('new.md');
+    const fresh = diffMarkdown(createMarkdown(), a, b).html;
+    const reused = createMarkdown();
+    expect(diffMarkdown(reused, a, b).html).toBe(fresh);
+    // The old side is reused here, as on a live update of the working file.
+    expect(diffMarkdown(reused, a, b).html).toBe(fresh);
+    expect(diffMarkdown(reused, a, a).hunks).toBe(0);
+    expect(diffMarkdown(reused, a, b).html).toBe(fresh);
+  });
+
+  it('parses a side again for another bibliography', () => {
+    const q = createMarkdown({ quarto: true });
+    const src = 'See [@a].\n';
+    const one = new Map([['a', { authors: ['One'], year: '2001' }]]);
+    const two = new Map([['a', { authors: ['Two'], year: '2002' }]]);
+    expect(diffMarkdown(q, src, src, { formulaParts: true, bibliography: one }).html).toContain('(One 2001)');
+    expect(diffMarkdown(q, src, src, { formulaParts: true, bibliography: two }).html).toContain('(Two 2002)');
+  });
+
+  it('returns the rows that html joins', () => {
+    const r = diffMarkdown(md, fixture('old.md'), fixture('new.md'));
+    expect(r.rows.join('\n')).toBe(r.html);
+    expect(r.rows.every((row) => /^<div class="(row|fold)/.test(row))).toBe(true);
+  });
+});
+
+describe('toRowsMessage', () => {
+  const message = (rows: string[], extra: Partial<UpdateMessage> = {}): UpdateMessage => ({
+    type: 'update', title: 't', labelA: 'a', labelB: 'b', html: rows.join('\n'), rows, hunks: 1, added: 0, removed: 0, changed: 1, reset: false, ...extra,
+  });
+
+  it('sends all rows as HTML when the webview shows nothing, a new file or an error', () => {
+    const first = toRowsMessage(message(['x', 'y']), undefined, 1);
+    expect(first).toMatchObject({ rows: ['x', 'y'], seq: 1 });
+    expect(first).not.toHaveProperty('base');
+    expect(toRowsMessage(message(['x'], { reset: true }), { seq: 1, rows: ['x'] }, 2).rows).toEqual(['x']);
+    expect(toRowsMessage(message([], { error: 'e' }), { seq: 1, rows: ['x'] }, 2).rows).toEqual([]);
+  });
+
+  it('sends a shown row as its index, and each shown row once', () => {
+    const wire = toRowsMessage(message(['a', 'new', 'b', 'a', 'a']), { seq: 4, rows: ['a', 'b', 'a', 'gone'] }, 5);
+    expect(wire).toMatchObject({ rows: [0, 'new', 1, 2, 'a'], seq: 5, base: 4 });
+    expect(wire).not.toHaveProperty('html');
   });
 });

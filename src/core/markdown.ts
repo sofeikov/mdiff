@@ -3,20 +3,27 @@ import type { MarkdownIt, Token } from 'markdown-it';
 import katexPlugin from '@vscode/markdown-it-katex';
 import katex from 'katex';
 import yaml from 'js-yaml';
+import { quartoPlugin } from './quarto';
 
 export type { Token };
 
 /** The most formulas that one parser keeps rendered. */
 const FORMULA_CACHE_SIZE = 5000;
 
+/** True for a Quarto document. */
+export function isQuartoPath(path: string): boolean {
+  return /\.qmd$/i.test(path);
+}
+
 /**
  * Creates a parser with the same math settings as the built-in VS Code preview.
+ * With `quarto`, the parser also reads Quarto syntax (see `quarto.ts`).
  *
  * The parser keeps the HTML of each formula that it renders. A diff renders the same formula
  * several times (for the block keys and for the output), and a live update renders the
  * unchanged formulas again, so the cache saves most of the KaTeX work.
  */
-export function createMarkdown(): MarkdownIt {
+export function createMarkdown(options: { quarto?: boolean } = {}): MarkdownIt {
   const md = new markdownIt({ html: true, linkify: true });
   const cache = new Map<string, string>();
   const cachedKatex = {
@@ -35,6 +42,7 @@ export function createMarkdown(): MarkdownIt {
   };
   const katexOptions = { enableBareBlocks: true, enableFencedBlocks: true, strict: 'ignore', katex: cachedKatex };
   katexPlugin(md, katexOptions as Parameters<typeof katexPlugin>[1]);
+  if (options.quarto) quartoPlugin(md);
   return md;
 }
 
@@ -49,7 +57,8 @@ export interface ParsedDoc {
 
 const FRONT_MATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
 
-export function parseDoc(md: MarkdownIt, source: string): ParsedDoc {
+/** Parses a document. `env` can hold values for the parser rules, such as the bibliography of a Quarto document. */
+export function parseDoc(md: MarkdownIt, source: string, env: Record<string, unknown> = {}): ParsedDoc {
   let body = source;
   let frontMatter: Record<string, unknown> | undefined;
   let frontMatterError: string | undefined;
@@ -68,7 +77,7 @@ export function parseDoc(md: MarkdownIt, source: string): ParsedDoc {
       frontMatterError = String(error);
     }
   }
-  const env: Record<string, unknown> = {};
+  env.frontMatter = frontMatter;
   const tokens = md.parse(body, env);
   return { frontMatter, frontMatterError, frontMatterLines, tokens, env };
 }

@@ -1,6 +1,7 @@
 import type { MarkdownIt } from 'markdown-it';
 import yaml from 'js-yaml';
 import type { ParsedDoc, Token } from './markdown';
+import { blockPrefix, divKind, KEY_ENV } from './quarto';
 
 /**
  * One block of a rendered document.
@@ -28,6 +29,8 @@ export interface Block {
   rows?: TableRow[];
   /** Pre-rendered HTML, for synthetic blocks that have no tokens. */
   html?: string;
+  /** HTML shown before the inline content of a leaf block but not compared, such as a section number. */
+  prefix?: string;
   /** Rendered HTML. Two blocks are equal when this is equal. */
   key: string;
   /** Plain text, for the similarity score. */
@@ -44,10 +47,15 @@ export interface TableRow {
 }
 
 export class BlockBuilder {
+  /** The env for comparison keys: numbers and citations render as their ids, so a new number is not a change. */
+  private readonly keyEnv: Record<string, unknown>;
+
   constructor(
     readonly md: MarkdownIt,
     readonly env: Record<string, unknown>,
-  ) {}
+  ) {
+    this.keyEnv = { ...env, [KEY_ENV]: true };
+  }
 
   render(tokens: Token[]): string {
     return this.md.renderer.render(tokens, this.md.options, this.env);
@@ -55,6 +63,15 @@ export class BlockBuilder {
 
   renderInline(tokens: Token[]): string {
     return this.md.renderer.renderInline(tokens, this.md.options, this.env);
+  }
+
+  /** Renders tokens for a comparison key. */
+  renderKey(tokens: Token[]): string {
+    return this.md.renderer.render(tokens, this.md.options, this.keyEnv);
+  }
+
+  renderInlineKey(tokens: Token[]): string {
+    return this.md.renderer.renderInline(tokens, this.md.options, this.keyEnv);
   }
 
   /** Builds the blocks of a document: the front matter first, then the body. */
@@ -88,7 +105,12 @@ export class BlockBuilder {
         continue;
       }
       const close = findClose(tokens, i, end);
-      blocks.push(this.compound(tokens, i, close));
+      if (tok.type === 'quarto_div_open' && divKind(tok).kind === 'plain') {
+        // A div without its own look, such as a tabset: its blocks align one by one.
+        blocks.push(...this.build(tokens, i + 1, close));
+      } else {
+        blocks.push(this.compound(tokens, i, close));
+      }
       i = close + 1;
     }
     return blocks;
@@ -96,7 +118,7 @@ export class BlockBuilder {
 
   private single(tok: Token): Block {
     const tokens = [tok];
-    const key = this.render(tokens);
+    const key = this.renderKey(tokens);
     const lines = tok.map ?? undefined;
     if (tok.type === 'math_block' || tok.type === 'math_block_eqno' || (tok.type === 'fence' && tok.info.trim().toLowerCase() === 'math')) {
       return { kind: 'math', type: 'math', tokens, key, text: tok.content, lines };
@@ -110,18 +132,21 @@ export class BlockBuilder {
   private compound(tokens: Token[], open: number, close: number): Block {
     const tok = tokens[open];
     const slice = tokens.slice(open, close + 1);
-    const key = this.render(slice);
+    const key = this.renderKey(slice);
     const lines = tok.map ?? undefined;
     const base = tok.type.replace(/_open$/, '');
 
     if ((base === 'paragraph' || base === 'heading') && close === open + 2 && tokens[open + 1].type === 'inline') {
       const inline = tokens[open + 1];
+      const cls = (tok.attrGet('class') as string | null) ?? undefined;
       return {
         kind: 'leaf',
-        type: base === 'heading' ? `heading:${tok.tag}` : 'paragraph',
+        type: base === 'heading' ? `heading:${tok.tag}` : cls === 'tbl-cap' ? 'tbl-cap' : 'paragraph',
         tokens: slice,
         inline,
         tag: tok.tag,
+        cls,
+        prefix: blockPrefix(tok),
         hidden: tok.hidden,
         key,
         text: inlineText(inline),
@@ -135,6 +160,15 @@ export class BlockBuilder {
     if (base === 'bullet_list' || base === 'ordered_list' || base === 'list_item' || base === 'blockquote') {
       const children = this.build(tokens, open + 1, close);
       return { kind: 'container', type: base, tokens: slice, children, key, text: children.map((c) => c.text).join('\n'), lines };
+    }
+    if (base === 'quarto_div') {
+      const d = divKind(tok);
+      if (d.kind === 'callout') {
+        const children = this.build(tokens, open + 1, close);
+        return { kind: 'container', type: `callout:${d.type}`, tokens: slice, children, key, text: children.map((c) => c.text).join('\n'), lines };
+      }
+      const html = this.render(slice);
+      return { kind: 'opaque', type: `div:${d.kind}`, tokens: slice, html, key, text: '', lines };
     }
     return { kind: 'opaque', type: base, tokens: slice, key, text: slice.map((t) => t.content).join(' '), lines };
   }
@@ -153,7 +187,7 @@ export class BlockBuilder {
         const style = tok.attrGet('style');
         row.cells.push({ tag: tok.tag, style: style === null ? null : String(style), inline });
       } else if (tok.type === 'tr_close' && row) {
-        row.key = row.section + ':' + row.cells.map((c) => `${c.tag}|${c.style ?? ''}|${this.renderInline(c.inline.children ?? [])}`).join('\u0001');
+        row.key = row.section + ':' + row.cells.map((c) => `${c.tag}|${c.style ?? ''}|${this.renderInlineKey(c.inline.children ?? [])}`).join('\u0001');
         row.text = row.cells.map((c) => inlineText(c.inline)).join(' ');
         rows.push(row);
         row = undefined;
@@ -168,7 +202,7 @@ export class BlockBuilder {
     const lineField = (field: string, tag: string, cls: string) => {
       const value = data[field];
       if (value === undefined || value === null) return;
-      const text = Array.isArray(value) ? value.map(String).join(', ') : String(value);
+      const text = Array.isArray(value) ? value.map(personName).join(', ') : personName(value);
       const inline = this.md.parseInline(text, this.env)[0];
       blocks.push({
         kind: 'leaf',
@@ -177,7 +211,7 @@ export class BlockBuilder {
         inline,
         tag,
         cls,
-        key: `fm:${field}:${this.renderInline(inline.children ?? [])}`,
+        key: `fm:${field}:${this.renderInlineKey(inline.children ?? [])}`,
         text,
       });
     };
@@ -208,6 +242,20 @@ export class BlockBuilder {
     }
     return blocks;
   }
+}
+
+/** A front matter value as text. Quarto writes an author as an object with a `name`. */
+function personName(value: unknown): string {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const name = (value as Record<string, unknown>).name;
+    if (typeof name === 'string') return name;
+    if (name && typeof name === 'object') {
+      const n = name as Record<string, unknown>;
+      if (typeof n.literal === 'string') return n.literal;
+      return [n.given, n.family].filter((x) => typeof x === 'string').join(' ');
+    }
+  }
+  return String(value);
 }
 
 function markAbstract(block: Block): Block {

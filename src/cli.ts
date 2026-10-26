@@ -1,9 +1,10 @@
-// Writes the rendered diff of two Markdown files to a standalone HTML page.
+// Writes the rendered diff of two Markdown or Quarto files to a standalone HTML page.
 // Usage: node dist/cli.js OLD.md NEW.md OUT.html
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { diffMarkdown } from './core/diff';
-import { createMarkdown } from './core/markdown';
+import { loadBibliography } from './bibliography';
+import { createMarkdown, isQuartoPath } from './core/markdown';
 import { buildShell } from './core/page';
 
 const [oldPath, newPath, outPath] = process.argv.slice(2);
@@ -16,7 +17,11 @@ const root = resolve(__dirname, '..');
 const outDir = dirname(resolve(outPath));
 const asset = (p: string) => relative(outDir, resolve(root, p));
 
-const result = diffMarkdown(createMarkdown(), readFileSync(oldPath, 'utf8'), readFileSync(newPath, 'utf8'));
+const oldSource = readFileSync(oldPath, 'utf8');
+const newSource = readFileSync(newPath, 'utf8');
+const quarto = isQuartoPath(oldPath) || isQuartoPath(newPath);
+const bibliography = quarto ? loadBibliography(newPath, newSource) : undefined;
+const result = diffMarkdown(createMarkdown({ quarto }), oldSource, newSource, { formulaParts: true, bibliography });
 const html = buildShell({
   cspSource: "'self' file:",
   nonce: 'standalone',
@@ -30,6 +35,8 @@ const html = buildShell({
     labelB: newPath,
     reset: true,
     ...result,
+    // The page shows `rows`, as the webview does; the same rows joined would double the page.
+    html: '',
   },
 });
 writeFileSync(outPath, html);

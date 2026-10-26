@@ -48,7 +48,9 @@ function atomize(builder: BlockBuilder, inline: Token): Atom[] {
       atoms.push({ key: `${ctxKey}| `, html: '\n', ctx, space: true });
     } else {
       const html = builder.renderInline([tok]);
-      const atom: Atom = { key: `${ctxKey}|${tok.type}:${tok.content}:${html}`, html, ctx, space: false };
+      // A Quarto cross-reference or citation compares by its source, not by its number or text.
+      const shown = tok.type.startsWith('quarto_') ? '' : html;
+      const atom: Atom = { key: `${ctxKey}|${tok.type}:${tok.content}:${shown}`, html, ctx, space: false };
       if (tok.type === 'math_inline' || tok.type === 'math_inline_block') {
         // The KaTeX plugin accepts $`…`$ as well as $…$.
         const c = tok.content;

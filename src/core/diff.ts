@@ -5,6 +5,7 @@ import { Block, BlockBuilder, TableRow } from './blocks';
 import { diffFormula } from './formula';
 import { diffInline, renderInlinePlain } from './inline';
 import { parseDoc } from './markdown';
+import { Bibliography, eqNumberHtml, fenceLabel } from './quarto';
 
 /** Paired blocks with a lower similarity than this show as whole-block changes, not as a word diff. */
 const MIN_WORD_DIFF_SIMILARITY = 0.25;
@@ -16,6 +17,8 @@ type Pair = { left: string; right: string };
 export interface DiffOptions {
   /** Mark the changed parts of a formula (true), or the whole formula (false). */
   formulaParts: boolean;
+  /** The bibliography of a Quarto document, for the text of its citations. */
+  bibliography?: Bibliography;
 }
 
 class PairRenderer {
@@ -69,7 +72,7 @@ class PairRenderer {
     const open = block.tokens[0];
     const attrs = (open?.attrs ?? []).filter(([k]) => k !== 'class').map(([k, v]) => ` ${k}="${escapeAttr(String(v))}"`).join('');
     const cls = classes ? ` class="${classes}"` : '';
-    return `<${block.tag}${attrs}${cls}>${inner}</${block.tag}>\n`;
+    return `<${block.tag}${attrs}${cls}>${block.prefix ?? ''}${inner}</${block.tag}>\n`;
   }
 
   private container(a: Block, b: Block): Pair {
@@ -96,7 +99,11 @@ class PairRenderer {
   private wrapTokens(block: Block, inner: string): string {
     const r = this.b.md.renderer;
     const t = block.tokens;
-    const html = r.renderToken(t, 0, this.b.md.options) + inner + r.renderToken(t, t.length - 1, this.b.md.options);
+    const one = (idx: number) => {
+      const rule = r.rules[t[idx].type];
+      return rule ? rule(t, idx, this.b.md.options, this.b.env, r) : r.renderToken(t, idx, this.b.md.options);
+    };
+    const html = one(0) + inner + one(t.length - 1);
     return wrapClass(html, block.cls);
   }
 
@@ -104,8 +111,8 @@ class PairRenderer {
     const d = this.options.formulaParts ? diffFormula(a.tokens[0].content, b.tokens[0].content, true) : undefined;
     if (!d) return this.whole(a, b);
     return {
-      left: `<div class="m-del"><p class="katex-block">${d.left}</p></div>\n`,
-      right: `<div class="m-ins"><p class="katex-block">${d.right}</p></div>\n`,
+      left: `<div class="m-del${eqNumberHtml(a.tokens[0]) ? ' eq' : ''}"><p class="katex-block">${d.left}</p>${eqNumberHtml(a.tokens[0])}</div>\n`,
+      right: `<div class="m-ins${eqNumberHtml(b.tokens[0]) ? ' eq' : ''}"><p class="katex-block">${d.right}</p>${eqNumberHtml(b.tokens[0])}</div>\n`,
     };
   }
 
@@ -133,7 +140,10 @@ class PairRenderer {
         ib += n;
       }
     }
-    return { left: `<pre class="code-diff"><code>${left}</code></pre>\n`, right: `<pre class="code-diff"><code>${right}</code></pre>\n` };
+    return {
+      left: `${fenceLabel(a.tokens[0], esc)}<pre class="code-diff"><code>${left}</code></pre>\n`,
+      right: `${fenceLabel(b.tokens[0], esc)}<pre class="code-diff"><code>${right}</code></pre>\n`,
+    };
   }
 
   private table(a: Block, b: Block): Pair {
@@ -229,6 +239,8 @@ function wrapUnit(unit: Unit, inner: string): string {
 export interface DiffResult {
   /** The rows of the side-by-side view. */
   html: string;
+  /** The same rows, one element each: a row of the view or a fold marker. `html` joins them. */
+  rows: string[];
   /** The number of change hunks: runs of rows next to each other that are not equal. */
   hunks: number;
   added: number;
@@ -236,19 +248,55 @@ export interface DiffResult {
   changed: number;
 }
 
+/** One parsed side of a diff: its builder and its units. Rendering a diff does not change it. */
+interface Side {
+  builder: BlockBuilder;
+  units: Unit[];
+  bibliography: Bibliography | undefined;
+}
+
+/** The most sides that one parser keeps. */
+const SIDE_CACHE_SIZE = 4;
+
+/**
+ * Parsed sides by parser and source. While the reader edits the working file, the other side
+ * does not change, so a live update parses only the side that changed.
+ */
+const sideCache = new WeakMap<MarkdownIt, Map<string, Side>>();
+
+function parseSide(md: MarkdownIt, source: string, bibliography: Bibliography | undefined): Side {
+  let cache = sideCache.get(md);
+  if (!cache) {
+    cache = new Map();
+    sideCache.set(md, cache);
+  }
+  const hit = cache.get(source);
+  if (hit && hit.bibliography === bibliography) {
+    // The most recently used side goes last, so the oldest is evicted first.
+    cache.delete(source);
+    cache.set(source, hit);
+    return hit;
+  }
+  const doc = parseDoc(md, source, { bibliography });
+  const builder = new BlockBuilder(md, doc.env);
+  const side = { builder, units: toUnits(builder.documentBlocks(doc)), bibliography };
+  cache.delete(source);
+  cache.set(source, side);
+  if (cache.size > SIDE_CACHE_SIZE) cache.delete(cache.keys().next().value!);
+  return side;
+}
+
 /** Diffs two Markdown sources and returns the rows of the side-by-side view. */
 export function diffMarkdown(md: MarkdownIt, oldSource: string, newSource: string, options: DiffOptions = { formulaParts: true }): DiffResult {
-  const docA = parseDoc(md, oldSource);
-  const docB = parseDoc(md, newSource);
-  const builderA = new BlockBuilder(md, docA.env);
-  const builderB = new BlockBuilder(md, docB.env);
+  const sideA = parseSide(md, oldSource, options.bibliography);
+  const sideB = parseSide(md, newSource, options.bibliography);
   // Link references resolve at parse time, so one renderer serves both sides.
-  const render = new PairRenderer(builderB, options);
-  const ops = align(toUnits(builderA.documentBlocks(docA)), toUnits(builderB.documentBlocks(docB)));
+  const render = new PairRenderer(sideB.builder, options);
+  const ops = align(sideA.units, sideB.units);
 
-  const result: DiffResult = { html: '', hunks: 0, added: 0, removed: 0, changed: 0 };
+  const result: DiffResult = { html: '', rows: [], hunks: 0, added: 0, removed: 0, changed: 0 };
   const isChange = (k: number) => k >= 0 && k < ops.length && ops[k].op !== 'eq';
-  const rows: string[] = [];
+  const rows = result.rows;
   let hidden = 0;
   const flushFold = () => {
     if (hidden > 0) rows.push(`<div class="fold">${hidden} unchanged block${hidden === 1 ? '' : 's'}</div>`);

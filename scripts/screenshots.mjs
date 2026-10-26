@@ -68,7 +68,9 @@ try {
     '--skip-welcome',
     '--skip-release-notes',
     '--no-sandbox',
-  ], { stdio: 'inherit', env: { ...process.env, DISPLAY: display, MDIFF_SHOTS_DIR: raw } });
+    // In a Wayland session, Electron would open the window on Wayland, not on the hidden X display.
+    '--ozone-platform=x11',
+  ], { stdio: 'inherit', env: { ...process.env, DISPLAY: display, WAYLAND_DISPLAY: '', MDIFF_SHOTS_DIR: raw } });
   status = result.status ?? 1;
 } finally {
   xvfb.kill();

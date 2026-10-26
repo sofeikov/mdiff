@@ -19,9 +19,42 @@ export interface UpdateMessage {
   added: number;
   removed: number;
   changed: number;
+  /** The rows that `html` joins, one element each. */
+  rows?: string[];
   /** True when a different file is shown, so the view scrolls to the top. */
   reset: boolean;
   error?: string;
+}
+
+/**
+ * What the extension posts to the webview for an update: the rows, each as HTML or as the
+ * index of an equal row in the rows that the webview shows already. On a live update most rows
+ * are equal, so the webview keeps their elements and only parses the changed rows.
+ */
+export interface RowsMessage extends Omit<UpdateMessage, 'html' | 'rows'> {
+  rows: (string | number)[];
+  /** The number of this set of rows. */
+  seq: number;
+  /** The `seq` of the rows that the indexes refer to. Absent when every row is HTML. */
+  base?: number;
+}
+
+/**
+ * Turns an update into the message for the webview. A row that the webview shows already is
+ * sent as its index there, not as its HTML.
+ */
+export function toRowsMessage(message: UpdateMessage, shown: { seq: number; rows: string[] } | undefined, seq: number): RowsMessage {
+  const { html: _html, rows = [], ...rest } = message;
+  if (!shown || message.reset || message.error) return { ...rest, rows, seq };
+  // The indexes of each row text in the shown rows, in order, so that equal rows map one to one.
+  const where = new Map<string, number[]>();
+  shown.rows.forEach((row, i) => {
+    const list = where.get(row);
+    if (list) list.push(i);
+    else where.set(row, [i]);
+  });
+  const patch = rows.map((row) => where.get(row)?.shift() ?? row);
+  return { ...rest, rows: patch, seq, base: shown.seq };
 }
 
 /** The HTML page that shows the side-by-side rendered diff. */

@@ -83,6 +83,13 @@ async function steps(): Promise<void> {
   edit.insert(file, new vscode.Position(doc.lineCount, 0), '\nA new closing paragraph.\n');
   await vscode.workspace.applyEdit(edit);
   await waitFor('the live update', () => api.lastMessage?.html.includes('closing'));
+  // The webview keeps the equal rows and parses only the changed ones, in the right order.
+  const patched = await waitFor('the webview to show the live update', () => api.lastRendered?.lastRow.includes('closing') && api.lastRendered);
+  const live = api.lastMessage!;
+  const rowCount = (live.rows ?? []).filter((r) => r.startsWith('<div class="row ')).length;
+  console.log('MDIFF INTEGRATION: live update', JSON.stringify({ rows: rowCount, entries: live.rows?.length, webview: patched.rows, parsed: patched.parsed }));
+  assert.equal(patched.rows, rowCount, 'the webview shows the rows of the update');
+  assert.ok(patched.parsed <= 3, `the live update parsed few rows (${patched.parsed} of ${live.rows?.length})`);
   await vscode.commands.executeCommand('workbench.action.files.revert');
 
   // 4. The command for a file against HEAD.
@@ -92,4 +99,15 @@ async function steps(): Promise<void> {
   const head = await waitFor('the HEAD diff', () => api.lastMessage);
   assert.equal(head.labelA, 'HEAD');
   assert.equal(head.hunks, 7);
+
+  // 5. A Quarto document opens the same way, and its citations come from the bibliography next to it.
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  await waitFor('the panel to close', () => !api.panelVisible && api.pair === undefined);
+  await vscode.commands.executeCommand('git.openChange', vscode.Uri.joinPath(folder, 'doc.qmd'));
+  const quarto = await waitFor('the Quarto diff', () => api.pair?.modified.path.endsWith('.qmd') && api.lastMessage);
+  assert.equal(quarto.error, undefined, quarto.error);
+  assert.equal(quarto.hunks, 3);
+  assert.ok(api.panelVisible, 'the panel is visible for a .qmd file');
+  assert.ok(quarto.html.includes('Smith and Doe (2020)'), 'the citation shows the author and year');
+  assert.ok(!quarto.html.includes('{#sec-'), 'heading attributes are not shown');
 }

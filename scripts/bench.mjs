@@ -6,7 +6,8 @@
 // The result is the paired difference before − after: its mean and a 95% bootstrap confidence
 // interval. A change is faster only when the whole interval is above 0.
 //   cold: a new parser for each call, as when the panel opens.
-//   warm: the same parser for each call, as on a live update while the reader edits.
+//   warm: the same parser for each call, and a new edit at the end of the new file each time,
+//         as on a live update while the reader edits. The old file stays the same.
 import * as esbuild from 'esbuild';
 import { execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -61,20 +62,23 @@ const builds = {
 
 const cases = [];
 for (let k = 0; k < files.length; k += 2) {
-  cases.push({ name: `${basename(files[k])} → ${basename(files[k + 1])}`, a: readFileSync(files[k], 'utf8'), b: readFileSync(files[k + 1], 'utf8') });
+  const quarto = /\.qmd$/i.test(files[k]) || /\.qmd$/i.test(files[k + 1]);
+  cases.push({ name: `${basename(files[k])} → ${basename(files[k + 1])}`, a: readFileSync(files[k], 'utf8'), b: readFileSync(files[k + 1], 'utf8'), quarto });
 }
 
 // Both builds must give the same output, or the comparison means nothing.
+const parser = (build, c) => build.createMarkdown({ quarto: c.quarto });
 for (const c of cases) {
-  const x = builds.before.diffMarkdown(builds.before.createMarkdown(), c.a, c.b).html;
-  const y = builds.after.diffMarkdown(builds.after.createMarkdown(), c.a, c.b).html;
+  const x = builds.before.diffMarkdown(parser(builds.before, c), c.a, c.b).html;
+  const y = builds.after.diffMarkdown(parser(builds.after, c), c.a, c.b).html;
   if (x !== y) console.warn(`WARNING: the output differs for ${c.name}`);
 }
 
-function time(build, c, mode, md) {
+function time(build, c, mode, md, edit) {
   globalThis.gc();
+  const b = mode === 'cold' ? c.b : `${c.b}\nEdit ${edit}.\n`;
   const t0 = performance.now();
-  build.diffMarkdown(mode === 'cold' ? build.createMarkdown() : md, c.a, c.b);
+  build.diffMarkdown(mode === 'cold' ? parser(build, c) : md, c.a, b);
   return performance.now() - t0;
 }
 
@@ -97,13 +101,14 @@ console.log(`before = ${beforeRef}, after = working tree, ${runs} rounds\n`);
 console.log('case                               mode   before ms  after ms   diff ms  95% CI of diff        result');
 for (const c of cases) {
   for (const mode of ['cold', 'warm']) {
-    const md = { before: builds.before.createMarkdown(), after: builds.after.createMarkdown() };
+    const md = { before: parser(builds.before, c), after: parser(builds.after, c) };
     // Warm-up: let the JIT settle and fill any per-parser caches.
-    for (let i = 0; i < 5; i++) for (const k of ['before', 'after']) time(builds[k], c, mode, md[k]);
+    let edit = 0;
+    for (let i = 0; i < 5; i++, edit++) for (const k of ['before', 'after']) time(builds[k], c, mode, md[k], edit);
     const t = { before: [], after: [] };
-    for (let i = 0; i < runs; i++) {
+    for (let i = 0; i < runs; i++, edit++) {
       const order = Math.random() < 0.5 ? ['before', 'after'] : ['after', 'before'];
-      for (const k of order) t[k].push(time(builds[k], c, mode, md[k]));
+      for (const k of order) t[k].push(time(builds[k], c, mode, md[k], edit));
     }
     const d = t.before.map((x, i) => x - t.after[i]);
     const [lo, hi] = bootstrapCI(d);

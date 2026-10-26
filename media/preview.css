@@ -73,6 +73,10 @@ body {
 .row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  /* A row off screen is not laid out, so a long document shows and updates quickly. Until a
+     row is first shown, its height is an estimate; then it keeps its last real height. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
 }
 .row .cell {
   padding: 0 16px;
@@ -175,3 +179,23 @@ tr.r-ph > td { padding: 0; height: 1.6em; background: repeating-linear-gradient(
 .cell .fm-abstract > p:first-child { margin-top: 0; }
 .cell table.fm-meta { font-size: 12px; }
 .cell .fm-error { color: var(--vscode-errorForeground, #d1242f); }
+
+/* Quarto */
+.cell .secnum { margin-right: 0.3em; }
+.cell .tbl-cap { font-size: 0.95em; color: var(--muted); }
+.cell .cap-label { font-weight: 600; }
+.cell .cite { color: var(--link); }
+.cell .xref.missing, .cell .cite.missing { color: var(--vscode-errorForeground, #d1242f); font-weight: 600; }
+.cell .callout { margin: 0 0 12px; padding: 4px 12px; border: 1px solid var(--border); border-left: 4px solid var(--chg-bar); border-radius: 3px; }
+.cell .callout-title { font-weight: 600; margin: 4px 0 8px; }
+.cell .callout-tip { border-left-color: var(--ins-bar); }
+.cell .callout-warning, .cell .callout-caution { border-left-color: #d29922; }
+.cell .callout-important { border-left-color: var(--del-bar); }
+.cell .callout > :last-child { margin-bottom: 4px; }
+.cell .cell-label { font-size: 11px; color: var(--muted); margin: 0 0 2px; }
+.cell .qcell.raw pre { opacity: 0.7; }
+.cell .shortcode { color: var(--muted); }
+.cell .quarto-refs { margin: 0 0 12px; color: var(--muted); font-style: italic; }
+.cell .eq { display: flex; align-items: center; gap: 12px; }
+.cell .eq > .katex-block { flex: 1; min-width: 0; }
+.cell .eqnum { color: var(--muted); }

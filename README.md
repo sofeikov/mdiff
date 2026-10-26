@@ -1,14 +1,14 @@
 # Markdown Rendered Diff
 
-Review changes to Markdown files as rendered text, not only as source.
+Review changes to Markdown and Quarto files as rendered text, not only as source.
 
-When you click a changed Markdown file in the Source Control (Git) view, VS Code opens the source diff as usual. This extension opens a second tab next to it at the same time. The tab shows the old and the new version rendered side by side, with the changes marked. You do not have to run a command.
+When you click a changed Markdown or Quarto file in the Source Control (Git) view, VS Code opens the source diff as usual. This extension opens a second tab next to it at the same time. The tab shows the old and the new version rendered side by side, with the changes marked. You do not have to run a command.
 
 ![The Source Control view, the source diff and the rendered diff](images/overview.png)
 
 ## Main features
 
-- **Opens with the source diff.** Click a `.md` file in the Source Control view, and the rendered diff opens next to the source diff. Click another Markdown file, and the panel follows. The source diff keeps the focus.
+- **Opens with the source diff.** Click a `.md` or `.qmd` file in the Source Control view, and the rendered diff opens next to the source diff. Click another Markdown file, and the panel follows. The source diff keeps the focus.
 - **Synced scrolling.** The rendered diff and the source diff editor scroll together. Scroll either one, and the other shows the same part of the file.
 - **Formula diff.** In a changed formula, only the changed parts are marked, for example one subscript, one added term or a changed number. This works for inline formulas (`$…$`) and block formulas (`$$…$$`).
 - **Word diff in paragraphs.** Changed words are marked red on the old side and green on the new side. Bold, italic, links and code stay formatted.
@@ -33,6 +33,19 @@ When the two versions of a formula have too little in common, or the marked form
 - Code blocks are diffed line by line.
 - YAML front matter (`title`, `subtitle`, `author`, `date`, `abstract`) shows as a title block and is diffed too. Other keys show in a small table.
 
+### Quarto
+
+`.qmd` files show the text that Quarto renders. Quarto is not run, and code cells are not executed.
+
+- **Sections:** heading attributes (`{#sec-x}`, `{.unnumbered}`) are hidden. With `number-sections: true` in the front matter, headings show Quarto's numbers.
+- **Cross-references:** `@sec-x`, `@tbl-x`, `@fig-x` and `@eq-x` show as "Section 5.3", "Table 2" and so on. Each side shows its own numbers. A cross-reference is compared by its id, so a new section that renumbers the sections after it does not mark the references to them as changed. Section numbers are not compared either.
+- **Table captions:** `: caption {#tbl-x}` shows as "Table N: caption" under the table.
+- **Equations:** `$$ … $$ {#eq-x}` shows its number.
+- **Citations:** `[@key, p. 3]`, `[see @a; @b]`, `@key` and `-@key` show in the author-date style, for example "(Gelada et al. 2019)". The author names and years come from the BibTeX files of `bibliography:` in the front matter. A key that is not in them shows as `?key`. A citation is compared by its keys, and a changed citation is marked as one unit.
+- **Divs:** callouts (`::: {.callout-note}`) show as boxes. Other divs, such as tabsets, show their content. `::: {#refs}` shows a placeholder for the reference list.
+- **Code cells and raw blocks:** ```` ```{python} ```` shows as code with a `python` label, and ```` ```{=latex} ```` as a dimmed block with a `raw latex` label. Both are diffed line by line.
+- **Shortcodes:** `{{< … >}}` show as written.
+
 ## Install
 
 Install "Markdown Rendered Diff" from the Extensions view, or run:
@@ -51,7 +64,7 @@ code --install-extension mdiff.vsix
 
 ## Use
 
-- **Source Control view:** click a changed `.md` file. The rendered diff opens next to the source diff.
+- **Source Control view:** click a changed `.md` or `.qmd` file. The rendered diff opens next to the source diff.
 - **Diff editor title bar:** the "Show Rendered Diff" button opens the panel for the active diff.
 - **Explorer or editor tab context menu:** "Rendered Diff with HEAD" opens the source diff and the rendered diff of a file against `HEAD`.
 - **Source Control context menu:** "Open Changes with Rendered Diff" works also when auto-open is off.
@@ -80,10 +93,10 @@ The panel updates when you edit the file.
 |---|---|
 | `npm run build` | Bundle the extension and the CLI into `dist/`. |
 | `npm test` | Run the unit tests of the diff core. |
-| `npm run test:integration` | Start VS Code with the extension and test it against a temporary Git repository. The test window runs on a hidden display, so `xvfb-run` must be installed (`sudo apt install xvfb`). Set `MDIFF_SHOW_WINDOW=1` to run it on your display instead. Set `VSCODE_BIN` to the VS Code (Electron) binary if it is not at `/snap/code/current/usr/share/code/code`. |
+| `npm run test:integration` | Start VS Code with the extension and test it against a temporary Git repository. The test window runs on a hidden display, so `xvfb-run` must be installed (`sudo apt install xvfb`). In a Wayland session, the window uses the X11 backend, so it also stays hidden there. Set `MDIFF_SHOW_WINDOW=1` to run it on your display instead. Set `VSCODE_BIN` to the VS Code (Electron) binary if it is not at `/snap/code/current/usr/share/code/code`. |
 | `npm run screenshots` | Take the README screenshots of `docs/demo/` in VS Code on a hidden display, and save them in `images/`. It needs `Xvfb`, `xwd`, `xdotool` and Python with Pillow. |
-| `npm run bench -- [--before REF] [--runs N] OLD.md NEW.md ...` | Compare the speed of the diff core at a git ref (default `HEAD`) with the working tree. It shows the mean time difference and its 95% confidence interval for a first render (cold) and for a live update (warm). |
-| `node dist/cli.js OLD.md NEW.md OUT.html` | Write the rendered diff of two files to an HTML page. |
+| `npm run bench -- [--before REF] [--runs N] OLD.md NEW.md ...` | Compare the speed of the diff core at a git ref (default `HEAD`) with the working tree. It shows the mean time difference and its 95% confidence interval for a first render (cold) and for a live update (warm): a new edit of the new file each time, with the same parser. |
+| `node dist/cli.js OLD.md NEW.md OUT.html` | Write the rendered diff of two files to an HTML page. If either file is a `.qmd` file, the Quarto syntax is read. |
 
 The diff core is in `src/core/` and does not use the VS Code API:
 
@@ -93,14 +106,26 @@ The diff core is in `src/core/` and does not use the VS Code API:
 - `inline.ts`: the word diff inside a block. Code spans and images are single units. A removed formula and an added formula at the same place pair, and `formula.ts` diffs them.
 - `formula.ts`: the diff inside a formula. It parses the LaTeX into a small tree, aligns the two trees and wraps each changed part in `\htmlClass`.
 - `align.ts`: the sequence alignment that the block, word and formula diffs use.
+- `quarto.ts`: the Quarto syntax: section numbers, cross-references, captions, citations, divs and code cells. Comparison keys render cross-references and citations by their source, so new numbers are not changes.
 
 ## Limits
+
+- Quarto: the output of code cells, `{{< include >}}`, Mermaid and Graphviz diagrams, and conditional content (`.content-visible`) are not rendered. `number-sections` and `bibliography` in `_quarto.yml` are not read, only those in the front matter of the file. Citations use one author-date style, not the CSL style of the document, and the reference list is not generated.
 
 - Images with relative paths do not show.
 - Mermaid diagrams and syntax highlighting of code blocks are not supported.
 - A rewritten paragraph that has few words in common with the old one shows as a whole-block change.
 
 ## Changelog
+
+### 0.5.0
+- Quarto (`.qmd`) files: section numbers, cross-references, table captions, equation numbers, citations from the BibTeX bibliography, callouts, code cells, raw blocks and shortcodes. A new section that renumbers the sections after it does not mark the references to them as changed.
+- An author in the front matter that is an object with a `name`, as Quarto writes it, shows its name.
+- Faster live updates of long documents. On a 700-line Quarto document, one edit took about 160 ms in the panel and now takes 5 to 25 ms:
+  - Rows off screen are not laid out (`content-visibility`).
+  - The extension sends only the changed rows, 11 KB instead of 1.4 MB, and the panel keeps the other rows.
+  - The side that did not change is not parsed again: the diff takes 12 ms, not 18 ms.
+- The integration test and the screenshot script keep their VS Code window on the hidden display in a Wayland session.
 
 ### 0.4.3
 - A changelog in the README.

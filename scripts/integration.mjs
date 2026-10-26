@@ -5,7 +5,7 @@
 // other windows or take the focus. Set MDIFF_SHOW_WINDOW=1 to run it on the real display.
 import * as esbuild from 'esbuild';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve('.');
@@ -34,9 +34,12 @@ for (let k = 1; k <= 60; k++) {
 }
 const withTail = (fixture) => readFileSync(fixture, 'utf8') + tail;
 writeFileSync(resolve(ws, 'doc.md'), withTail('test/fixtures/old.md'));
-git('add', 'doc.md');
+copyFileSync('test/fixtures/quarto-old.qmd', resolve(ws, 'doc.qmd'));
+copyFileSync('test/fixtures/quarto.bib', resolve(ws, 'quarto.bib'));
+git('add', '.');
 git('-c', 'user.name=test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'old');
 writeFileSync(resolve(ws, 'doc.md'), withTail('test/fixtures/new.md'));
+copyFileSync('test/fixtures/quarto-new.qmd', resolve(ws, 'doc.qmd'));
 
 const showWindow = process.env.MDIFF_SHOW_WINDOW === '1';
 const hasXvfb = spawnSync('sh', ['-c', 'command -v xvfb-run'], { stdio: 'ignore' }).status === 0;
@@ -45,6 +48,11 @@ if (!showWindow && !hasXvfb) {
   process.exit(2);
 }
 const [command, prefix] = showWindow ? [code, []] : ['xvfb-run', ['-a', '-s', '-screen 0 1600x1000x24', code]];
+// In a Wayland session, Electron opens its window on Wayland and ignores the virtual X display.
+// Without WAYLAND_DISPLAY, and with the X11 backend, the window stays on the virtual display.
+const env = { ...process.env };
+if (!showWindow) delete env.WAYLAND_DISPLAY;
+const hidden = showWindow ? [] : ['--ozone-platform=x11'];
 
 const result = spawnSync(command, [
   ...prefix,
@@ -58,5 +66,6 @@ const result = spawnSync(command, [
   '--skip-welcome',
   '--skip-release-notes',
   '--no-sandbox',
-], { stdio: 'inherit' });
+  ...hidden,
+], { stdio: 'inherit', env });
 process.exit(result.status ?? 1);
