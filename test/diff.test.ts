@@ -133,6 +133,18 @@ describe('diffMarkdown', () => {
     expect(row.right).toContain('<em><span class="x-ins">bold</span></em>');
   });
 
+  it('finds no change when only the white space of the text changes', () => {
+    const old = 'One two three four.\n\n- An item with `code` in it.\n\n| a | b |\n|---|---|\n| one two | x |\n';
+    const wrapped = 'One two\nthree  four.\n\n- An item  with `code`\n  in it.\n\n| a | b |\n|---|---|\n| one two | x |\n';
+    expect(diffMarkdown(md, old, wrapped)).toMatchObject({ hunks: 0, changed: 0, added: 0, removed: 0 });
+  });
+
+  it('still shows a change of indentation in a code block', () => {
+    const r = diffMarkdown(md, '- item\n\n  ```\n  a\n    b\n  ```\n', '- item\n\n  ```\n  a\n  b\n  ```\n');
+    expect(r.changed).toBe(1);
+    expect(r.html).toContain('<span class="l-del">  b</span>');
+  });
+
   it('aligns table rows and shows an inserted row with a placeholder on the old side', () => {
     const r = diffMarkdown(md, fixture('old.md'), fixture('new.md'));
     const table = rows(r.html).find((x) => x.left.includes('<table>'))!;

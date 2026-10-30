@@ -67,11 +67,11 @@ export class BlockBuilder {
 
   /** Renders tokens for a comparison key. */
   renderKey(tokens: Token[]): string {
-    return this.md.renderer.render(tokens, this.md.options, this.keyEnv);
+    return collapseSpace(this.md.renderer.render(tokens, this.md.options, this.keyEnv));
   }
 
   renderInlineKey(tokens: Token[]): string {
-    return this.md.renderer.renderInline(tokens, this.md.options, this.keyEnv);
+    return collapseSpace(this.md.renderer.renderInline(tokens, this.md.options, this.keyEnv));
   }
 
   /** Builds the blocks of a document: the front matter first, then the body. */
@@ -256,6 +256,14 @@ function personName(value: unknown): string {
     }
   }
   return String(value);
+}
+
+/**
+ * Makes every run of white space one space, outside `<pre>`. The page shows such runs as one
+ * space, so a text that only re-wraps a paragraph or doubles a space is not a change.
+ */
+function collapseSpace(html: string): string {
+  return html.replace(/(<pre[\s>][\s\S]*?<\/pre>)|\s+/g, (run, pre: string | undefined) => pre ?? ' ');
 }
 
 function markAbstract(block: Block): Block {
