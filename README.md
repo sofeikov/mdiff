@@ -122,10 +122,12 @@ The diff core is in `src/core/` and does not use the VS Code API:
 
 ## Changelog
 
+### 0.5.1
+- A block whose text changed only in white space, for example a re-wrapped paragraph or a double space, is not a change. Before, it counted as a change with nothing marked. A change of indentation in a code block is still a change.
+
 ### 0.5.0
 - Quarto (`.qmd`) files: section numbers, cross-references, table captions, equation numbers, citations from the BibTeX bibliography, callouts, code cells, raw blocks and shortcodes. A new section that renumbers the sections after it does not mark the references to them as changed.
 - An author in the front matter that is an object with a `name`, as Quarto writes it, shows its name.
-- A block whose text changed only in white space, for example a re-wrapped paragraph or a double space, is not a change. Before, it counted as a change with nothing marked. A change of indentation in a code block is still a change.
 - Faster live updates of long documents. On a 700-line Quarto document, one edit took about 160 ms in the panel and now takes 5 to 25 ms:
   - Rows off screen are not laid out (`content-visibility`).
   - The extension sends only the changed rows, 11 KB instead of 1.4 MB, and the panel keeps the other rows.

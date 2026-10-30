@@ -2,7 +2,7 @@
   "name": "mdiff",
   "displayName": "Markdown Rendered Diff",
   "description": "Shows the diff of a Markdown or Quarto file as rendered output, next to the source diff.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "KonstantinSofeikov",
   "license": "MIT",
   "repository": {
