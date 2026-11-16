@@ -110,6 +110,10 @@ The panel updates when you edit the file.
 | `npm run bench -- [--before REF] [--runs N] OLD.md NEW.md ...` | Compare the speed of the diff core at a git ref (default `HEAD`) with the working tree. It shows the mean time difference and its 95% confidence interval for a first render (cold) and for a live update (warm): a new edit of the new file each time, with the same parser. |
 | `node dist/cli.js OLD.md NEW.md OUT.html` | Write the rendered diff of two files to an HTML page. If either file is a `.qmd` file, the Quarto syntax is read. |
 
+### Releases
+
+Releases are published from GitHub Actions with Marketplace trusted publishing; no token is stored. Set the version in `package.json` and the changelog, commit to `master`, then push a tag `vX.Y.Z` with the same version. `.github/workflows/release.yml` checks that the tag is on `master` and matches `package.json`, runs `npm run typecheck`, `npm test` and `npm run package`, then waits for the maintainer's approval in the `marketplace` GitHub environment and runs `vsce publish --oidc`. The Marketplace policy accepts only that workflow file and environment name, so renaming either breaks publishing.
+
 The diff core is in `src/core/` and does not use the VS Code API:
 
 - `markdown.ts`: the parser (markdown-it with the KaTeX plugin of the built-in preview) and the front matter.
