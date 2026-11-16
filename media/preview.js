@@ -210,7 +210,23 @@
     rowEls = els;
   }
 
+  /** Relative image paths resolve against the folder of the document. */
+  function setBase(href) {
+    let base = document.querySelector('base');
+    if (!href) {
+      if (base) base.remove();
+      return;
+    }
+    if (!base) {
+      base = document.createElement('base');
+      document.head.prepend(base);
+    }
+    if (base.getAttribute('href') !== href) base.setAttribute('href', href);
+  }
+
   function update(msg) {
+    document.body.classList.toggle('preview', !!msg.preview);
+    setBase(msg.baseUrl);
     $('title').textContent = msg.title;
     $('label-a').textContent = msg.labelA;
     $('label-b').textContent = msg.labelB;
@@ -237,7 +253,7 @@
       if (msg.rows) setRows(msg.rows, msg.base !== undefined);
       else content.innerHTML = msg.html;
       shownSeq = msg.seq;
-      if (msg.hunks === 0) {
+      if (msg.hunks === 0 && !msg.preview) {
         const div = document.createElement('div');
         div.className = 'empty';
         div.textContent = 'The rendered documents are the same.';
@@ -286,8 +302,17 @@
     const a = e.target.closest && e.target.closest('a[href]');
     if (!a || !vscode) return;
     const href = a.getAttribute('href');
-    if (href.startsWith('#')) return;
     e.preventDefault();
+    if (href.startsWith('#')) {
+      // With a <base>, the browser would resolve the anchor against the document folder.
+      const target = document.getElementById(decodeURIComponent(href.slice(1)));
+      if (target) {
+        const top = () => target.getBoundingClientRect().top + window.scrollY - headerHeight() - 8;
+        window.scrollTo({ top: top(), behavior: 'smooth' });
+        pendingTarget = { top, until: Date.now() + 2000 };
+      }
+      return;
+    }
     vscode.postMessage({ type: 'open', href });
   });
   window.addEventListener('message', (e) => {

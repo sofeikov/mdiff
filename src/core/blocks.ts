@@ -246,6 +246,8 @@ export class BlockBuilder {
 
 /** A front matter value as text. Quarto writes an author as an object with a `name`. */
 function personName(value: unknown): string {
+  // YAML reads `date: 2024-05-01` as a date: show it as written.
+  if (value instanceof Date) return isNaN(value.getTime()) ? String(value) : value.toISOString().slice(0, 10);
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const name = (value as Record<string, unknown>).name;
     if (typeof name === 'string') return name;

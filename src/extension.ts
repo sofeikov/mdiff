@@ -1,11 +1,13 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { loadBibliography } from './bibliography';
-import { diffMarkdown } from './core/diff';
+import { diffMarkdown, previewMarkdown } from './core/diff';
 import { createMarkdown, isQuartoPath } from './core/markdown';
 import { buildShell, toRowsMessage, UpdateMessage } from './core/page';
 
 const MARKDOWN_FILE = /\.(md|markdown|mdown|mkd|mkdn|qmd)$/i;
+/** The files that get a preview. VS Code previews Markdown itself. */
+const PREVIEW_FILE = /\.qmd$/i;
 
 interface DiffPair {
   original: vscode.Uri;
@@ -24,18 +26,32 @@ export interface MdiffApi {
   readonly lastSynced: number | undefined;
   /** Sends a scroll to the webview as if the reader made it: to an offset, or to the first row with a text. Only for the tests. */
   testScroll(to: number | string): void;
+  /** The same state for the preview panel of a Quarto file. */
+  readonly preview: Omit<MdiffApi, 'preview'>;
 }
 
 export function activate(context: vscode.ExtensionContext): MdiffApi {
-  const controller = new RenderedDiffController(context);
+  const preview = new RenderedDiffController(context, 'preview');
+  const controller = new RenderedDiffController(context, 'diff', preview);
   context.subscriptions.push(
     controller,
+    preview,
+    vscode.window.onDidChangeActiveTextEditor((e) => preview.onActiveEditor(e)),
     vscode.window.tabGroups.onDidChangeTabs((e) => controller.onTabsChanged(e)),
-    vscode.workspace.onDidChangeTextDocument((e) => controller.onDocumentChanged(e.document)),
-    vscode.window.onDidChangeTextEditorVisibleRanges((e) => controller.onEditorScrolled(e.textEditor)),
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('mdiff.formulaDiff')) controller.refresh();
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      controller.onDocumentChanged(e.document);
+      preview.onDocumentChanged(e.document);
     }),
+    vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
+      controller.onEditorScrolled(e.textEditor);
+      preview.onEditorScrolled(e.textEditor);
+    }),
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration('mdiff.formulaDiff')) return;
+      controller.refresh();
+      preview.refresh();
+    }),
+    vscode.commands.registerCommand('mdiff.showPreviewToSide', (uri?: vscode.Uri) => preview.showPreview(uri)),
     vscode.commands.registerCommand('mdiff.showRenderedDiff', (uri?: vscode.Uri) => controller.showForActiveTab(uri)),
     vscode.commands.registerCommand('mdiff.openChange', (...states: unknown[]) => controller.openChange(states)),
     vscode.commands.registerCommand('mdiff.compareWithHead', (uri?: vscode.Uri) => controller.compareWithHead(uri)),
@@ -67,6 +83,16 @@ function isMarkdownDiff(input: unknown): input is vscode.TabInputTextDiff {
   return input instanceof vscode.TabInputTextDiff && (MARKDOWN_FILE.test(input.modified.path) || MARKDOWN_FILE.test(input.original.path));
 }
 
+/** The text editor of a file, not one side of a diff editor. */
+function isPlainEditor(editor: vscode.TextEditor): boolean {
+  const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+  return !(tab?.input instanceof vscode.TabInputTextDiff) && editor === vscode.window.activeTextEditor;
+}
+
+/**
+ * One rendered panel. In `diff` mode it shows the side-by-side diff of a diff tab. In
+ * `preview` mode it shows one Quarto file, in one column, and follows the active Quarto editor.
+ */
 class RenderedDiffController implements MdiffApi, vscode.Disposable {
   private readonly md = createMarkdown();
   private readonly qmd = createMarkdown({ quarto: true });
@@ -86,7 +112,16 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
   private shownRows: { seq: number; rows: string[] } | undefined;
   private seq = 0;
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly mode: 'diff' | 'preview',
+    /** The preview controller, which the API exposes for the tests. */
+    private readonly previewController?: RenderedDiffController,
+  ) {}
+
+  get preview(): Omit<MdiffApi, 'preview'> {
+    return this.previewController ?? this;
+  }
 
   get panelVisible(): boolean {
     return !!this.panel?.visible;
@@ -107,10 +142,29 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
   }
 
   onTab(tab: vscode.Tab): void {
-    if (!isMarkdownDiff(tab.input)) return;
+    if (this.mode !== 'diff' || !isMarkdownDiff(tab.input)) return;
     // With auto-open off, the panel still follows the active diff after the reader opened it once.
     if (!autoOpen() && !this.panel && Date.now() > this.forceUntil) return;
     this.show({ original: tab.input.original, modified: tab.input.modified, title: tab.label }, tab.group);
+  }
+
+  /** Preview: an open preview follows the active Quarto editor, as the built-in Markdown preview does. */
+  onActiveEditor(editor: vscode.TextEditor | undefined): void {
+    if (this.mode !== 'preview' || !this.panel || !editor || !isPlainEditor(editor)) return;
+    const uri = editor.document.uri;
+    if (!PREVIEW_FILE.test(uri.path) || uri.toString() === this.pair?.modified.toString()) return;
+    this.show({ original: uri, modified: uri, title: path.basename(uri.path) }, undefined, false);
+  }
+
+  /** Command: show the preview of a Quarto file next to its editor. */
+  async showPreview(uri?: vscode.Uri): Promise<void> {
+    const target = uri instanceof vscode.Uri ? uri : vscode.window.activeTextEditor?.document.uri;
+    if (!target || !PREVIEW_FILE.test(target.path)) {
+      void vscode.window.showInformationMessage('Open a Quarto (.qmd) file first.');
+      return;
+    }
+    const group = vscode.window.tabGroups.activeTabGroup;
+    this.show({ original: target, modified: target, title: path.basename(target.path) }, group);
   }
 
   onDocumentChanged(doc: vscode.TextDocument): void {
@@ -186,30 +240,36 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     if (tab) this.onTab(tab);
   }
 
-  private show(pair: DiffPair, group: vscode.TabGroup | undefined): void {
+  /** Shows a pair in the panel. Without `reveal`, a hidden panel stays hidden and only updates. */
+  private show(pair: DiffPair, group: vscode.TabGroup | undefined, reveal = true): void {
     const same = !!this.pair && this.pair.original.toString() === pair.original.toString() && this.pair.modified.toString() === pair.modified.toString();
     // Keep the same object for the same files: a render in progress checks it before it posts.
     if (same) this.pair!.title = pair.title;
     else this.pair = pair;
     if (!this.panel) {
-      this.panel = this.createPanel();
+      this.panel = this.createPanel(pair.modified);
+    } else if (!reveal) {
+      // Leave the panel where it is.
     } else if (group && this.panel.viewColumn === group.viewColumn) {
       // Do not cover the source diff: move the panel next to it.
       this.panel.reveal(vscode.ViewColumn.Beside, true);
     } else if (!this.panel.visible) {
       this.panel.reveal(this.panel.viewColumn, true);
     }
-    this.panel.title = `Rendered: ${path.basename(pair.modified.path)}`;
+    this.panel.title = `${this.mode === 'preview' ? 'Preview' : 'Rendered'}: ${path.basename(pair.modified.path)}`;
     if (!same || !this.lastMessage) void this.render(true);
   }
 
-  private createPanel(): vscode.WebviewPanel {
+  private createPanel(doc: vscode.Uri): vscode.WebviewPanel {
     const media = vscode.Uri.joinPath(this.context.extensionUri, 'media');
+    // The images of the document: the workspace folders, and the folder of the first document.
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri);
+    const roots = [media, ...folders, vscode.Uri.file(path.dirname(doc.fsPath))];
     const panel = vscode.window.createWebviewPanel(
-      'mdiff.renderedDiff',
-      'Rendered diff',
+      this.mode === 'preview' ? 'mdiff.preview' : 'mdiff.renderedDiff',
+      this.mode === 'preview' ? 'Preview' : 'Rendered diff',
       { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
-      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [media] },
+      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: roots },
     );
     const asset = (...p: string[]) => panel.webview.asWebviewUri(vscode.Uri.joinPath(media, ...p)).toString();
     this.ready = false;
@@ -286,15 +346,33 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     const pair = this.pair;
     if (!pair) return;
     let message: UpdateMessage;
-    const base = { type: 'update' as const, title: pair.title, labelA: describe(pair.original), labelB: describe(pair.modified), reset };
+    const preview = this.mode === 'preview';
+    // Relative images resolve against the folder of the file. A Git URI has the path of the file in the working tree.
+    const folder = this.panel?.webview.asWebviewUri(vscode.Uri.file(path.dirname(pair.modified.fsPath))).toString();
+    const base = {
+      type: 'update' as const,
+      title: pair.title,
+      labelA: describe(pair.original),
+      labelB: describe(pair.modified),
+      reset,
+      preview,
+      baseUrl: folder && `${folder.replace(/\/$/, '')}/`,
+    };
     try {
-      const [a, b] = await Promise.all([readText(pair.original), readText(pair.modified)]);
       const quarto = isQuartoPath(pair.original.path) || isQuartoPath(pair.modified.path);
-      // A Git URI has the path of the file in the working tree, so the bibliography next to it is found.
-      const bibliography = quarto ? loadBibliography(pair.modified.fsPath, b) : undefined;
-      message = { ...base, ...diffMarkdown(quarto ? this.qmd : this.md, a, b, { formulaParts: formulaParts(), bibliography }) };
+      const md = quarto ? this.qmd : this.md;
+      if (preview) {
+        const b = await readText(pair.modified);
+        const bibliography = quarto ? loadBibliography(pair.modified.fsPath, b) : undefined;
+        message = { ...base, hunks: 0, added: 0, removed: 0, changed: 0, ...previewMarkdown(md, b, { formulaParts: formulaParts(), bibliography }) };
+      } else {
+        const [a, b] = await Promise.all([readText(pair.original), readText(pair.modified)]);
+        // The bibliography next to the working-tree file is found also for a Git URI.
+        const bibliography = quarto ? loadBibliography(pair.modified.fsPath, b) : undefined;
+        message = { ...base, ...diffMarkdown(md, a, b, { formulaParts: formulaParts(), bibliography }) };
+      }
     } catch (error) {
-      message = { ...base, html: '', hunks: 0, added: 0, removed: 0, changed: 0, error: `Cannot render the diff: ${String(error)}` };
+      message = { ...base, html: '', hunks: 0, added: 0, removed: 0, changed: 0, error: `Cannot render the ${preview ? 'preview' : 'diff'}: ${String(error)}` };
     }
     // A newer request replaced this one while the files were read.
     if (pair !== this.pair || !this.panel) return;

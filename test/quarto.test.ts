@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { diffMarkdown } from '../src/core/diff';
+import { diffMarkdown, previewMarkdown } from '../src/core/diff';
 import { createMarkdown, parseDoc } from '../src/core/markdown';
 import { Bibliography, bibliographyPaths, parseAttrs, parseBibtex } from '../src/core/quarto';
 
@@ -183,5 +183,23 @@ describe('Quarto diff', () => {
   it('keeps the number of a changed equation', () => {
     const r = diffMarkdown(qmd, '$$\na + b\n$$ {#eq-x}\n', '$$\na + c\n$$ {#eq-x}\n', options);
     expect(rows(r.html)[0].right).toContain('<span class="eqnum">(1)</span>');
+  });
+});
+
+describe('Quarto preview', () => {
+  it('renders one column with the source lines of each block', () => {
+    const src = numbered('# Intro {#sec-intro}\n\nSee @sec-intro and @smith2020.\n\n- one\n- two\n');
+    const p = previewMarkdown(qmd, src, options);
+    expect(p.rows.every((r) => r.startsWith('<div class="row eq"') && !r.includes('cell a'))).toBe(true);
+    expect(p.html).toContain('<span class="secnum">1</span>');
+    expect(text(p.html)).toContain('Smith and Doe (2020)');
+    expect(p.rows.some((r) => r.includes('data-b="6,7"'))).toBe(true);
+    // Each item of a top-level list is its own row.
+    expect(p.rows.filter((r) => r.includes('<ul class="unit">'))).toHaveLength(2);
+  });
+
+  it('shows a front matter date as written', () => {
+    const p = previewMarkdown(qmd, '---\ntitle: T\ndate: 2026-11-16\n---\n\nText.\n', options);
+    expect(p.html).toContain('<p class="fm-date">2026-11-16</p>');
   });
 });

@@ -1,7 +1,7 @@
 {
   "name": "mdiff",
   "displayName": "Markdown Rendered Diff",
-  "description": "Shows the diff of a Markdown or Quarto file as rendered output, next to the source diff.",
+  "description": "Shows the diff of a Markdown or Quarto file as rendered output, next to the source diff, and a rendered preview of Quarto files.",
   "version": "0.5.1",
   "publisher": "KonstantinSofeikov",
   "license": "MIT",
@@ -41,6 +41,12 @@
         "command": "mdiff.compareWithHead",
         "title": "Rendered Diff with HEAD",
         "category": "Markdown Rendered Diff"
+      },
+      {
+        "command": "mdiff.showPreviewToSide",
+        "title": "Open Quarto Preview to the Side",
+        "category": "Markdown Rendered Diff",
+        "icon": "$(open-preview)"
       }
     ],
     "menus": {
@@ -49,6 +55,11 @@
           "command": "mdiff.showRenderedDiff",
           "when": "isInDiffEditor && (resourceLangId == markdown || resourceLangId == quarto || resourceExtname == .qmd)",
           "group": "navigation"
+        },
+        {
+          "command": "mdiff.showPreviewToSide",
+          "when": "!isInDiffEditor && (resourceExtname =~ /^\\.qmd$/i || resourceLangId == quarto)",
+          "group": "navigation"
         }
       ],
       "editor/title/context": [
@@ -56,6 +67,11 @@
           "command": "mdiff.compareWithHead",
           "when": "resourceScheme == file && resourceExtname =~ /^\\.(md|markdown|mdown|mkd|mkdn|qmd)$/i",
           "group": "mdiff"
+        },
+        {
+          "command": "mdiff.showPreviewToSide",
+          "when": "resourceExtname =~ /^\\.qmd$/i",
+          "group": "1_open"
         }
       ],
       "explorer/context": [
@@ -63,6 +79,11 @@
           "command": "mdiff.compareWithHead",
           "when": "resourceScheme == file && resourceExtname =~ /^\\.(md|markdown|mdown|mkd|mkdn|qmd)$/i",
           "group": "3_compare"
+        },
+        {
+          "command": "mdiff.showPreviewToSide",
+          "when": "resourceExtname =~ /^\\.qmd$/i",
+          "group": "navigation"
         }
       ],
       "scm/resourceState/context": [
@@ -106,7 +127,15 @@
           "description": "Keep the scroll position of the rendered diff and of the source diff editor in step."
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "mdiff.showPreviewToSide",
+        "key": "ctrl+k v",
+        "mac": "cmd+k v",
+        "when": "editorTextFocus && !isInDiffEditor && (resourceExtname =~ /^\\.qmd$/i || resourceLangId == quarto)"
+      }
+    ]
   },
   "scripts": {
     "build": "node scripts/build.mjs",

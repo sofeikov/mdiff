@@ -349,3 +349,24 @@ export function diffMarkdown(md: MarkdownIt, oldSource: string, newSource: strin
   return result;
 }
 
+
+export interface PreviewResult {
+  /** The rows of the preview, one column each. */
+  html: string;
+  /** The same rows, one element each. `html` joins them. */
+  rows: string[];
+}
+
+/**
+ * Renders one document as a single-column preview, with the same blocks and rows as one side
+ * of a diff. Each row has the source lines of its block, for the scroll sync with the editor.
+ */
+export function previewMarkdown(md: MarkdownIt, source: string, options: DiffOptions = { formulaParts: true }): PreviewResult {
+  const side = parseSide(md, source, options.bibliography);
+  const render = new PairRenderer(side.builder, options);
+  const rows = side.units.map((unit) => {
+    const lines = unit.block.lines ? ` data-b="${unit.block.lines[0]},${unit.block.lines[1]}"` : '';
+    return `<div class="row eq"${lines}><div class="cell b">${wrapUnit(unit, render.plain(unit.block))}</div></div>`;
+  });
+  return { html: rows.join('\n'), rows };
+}

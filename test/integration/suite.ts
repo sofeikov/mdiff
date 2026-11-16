@@ -110,4 +110,25 @@ async function steps(): Promise<void> {
   assert.ok(api.panelVisible, 'the panel is visible for a .qmd file');
   assert.ok(quarto.html.includes('Smith and Doe (2020)'), 'the citation shows the author and year');
   assert.ok(!quarto.html.includes('{#sec-'), 'heading attributes are not shown');
+
+  // 6. The preview of a Quarto file opens next to its editor and follows its edits.
+  await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  await waitFor('the panel to close', () => !api.panelVisible && api.pair === undefined);
+  const qmdFile = vscode.Uri.joinPath(folder, 'doc.qmd');
+  const qmdEditor = await vscode.window.showTextDocument(qmdFile);
+  await vscode.commands.executeCommand('mdiff.showPreviewToSide');
+  const prev = await waitFor('the Quarto preview', () => api.preview.lastMessage);
+  assert.equal(prev.error, undefined, prev.error);
+  assert.ok(prev.preview, 'the message is a preview');
+  assert.ok(prev.html.includes('Smith and Doe (2020)'), 'the preview resolves citations');
+  assert.ok(!prev.html.includes('cell a'), 'the preview has one column');
+  const prevPage = await waitFor('the webview to show the preview', () => api.preview.lastRendered);
+  assert.equal(prevPage.rows, prev.rows?.length);
+  assert.ok(!api.panelVisible, 'the diff panel stays closed');
+  const prevTab = tabs().find(({ t }) => t.input instanceof vscode.TabInputWebview && t.input.viewType.includes('mdiff.preview'));
+  assert.ok(prevTab, 'the preview tab is open');
+  assert.notEqual(prevTab.g.viewColumn, qmdEditor.viewColumn, 'the preview opens to the side');
+  await qmdEditor.edit((e) => e.insert(new vscode.Position(qmdEditor.document.lineCount, 0), '\nA preview paragraph.\n'));
+  await waitFor('the preview to update', () => api.preview.lastMessage?.html.includes('A preview paragraph'));
+  await vscode.commands.executeCommand('workbench.action.files.revert');
 }

@@ -199,3 +199,11 @@ tr.r-ph > td { padding: 0; height: 1.6em; background: repeating-linear-gradient(
 .cell .eq { display: flex; align-items: center; gap: 12px; }
 .cell .eq > .katex-block { flex: 1; min-width: 0; }
 .cell .eqnum { color: var(--muted); }
+
+/* Preview of one document: one column, no toolbar, the width of the built-in preview */
+body.preview .bar, body.preview .labels { display: none; }
+body.preview main { max-width: 882px; margin: 0 auto; padding: 0 10px 40px; }
+body.preview .row { grid-template-columns: minmax(0, 1fr); }
+body.preview .row .cell { border-left: none; }
+/* Options such as number-sections are not part of the rendered page; the diff shows them. */
+body.preview .row:has(> .cell > table.fm-meta) { display: none; }

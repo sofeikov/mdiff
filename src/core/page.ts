@@ -24,6 +24,10 @@ export interface UpdateMessage {
   /** True when a different file is shown, so the view scrolls to the top. */
   reset: boolean;
   error?: string;
+  /** True for the preview of one document: one column, no change bar. */
+  preview?: boolean;
+  /** The URL that relative links and images resolve against: the folder of the document. */
+  baseUrl?: string;
 }
 
 /**

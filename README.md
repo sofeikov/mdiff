@@ -10,6 +10,7 @@ When you click a changed Markdown or Quarto file in the Source Control (Git) vie
 
 - **Opens with the source diff.** Click a `.md` or `.qmd` file in the Source Control view, and the rendered diff opens next to the source diff. Click another Markdown or Quarto file, and the panel follows. The source diff keeps the focus.
 - **Quarto.** `.qmd` files show section numbers, cross-references, citations, captions, callouts and code cells as Quarto renders them, without running Quarto. A new section that renumbers the others does not mark every reference as changed.
+- **Quarto preview.** A `.qmd` editor gets the same preview button as a Markdown editor. It opens the rendered file next to the editor, with the Quarto features below.
 - **Synced scrolling.** The rendered diff and the source diff editor scroll together. Scroll either one, and the other shows the same part of the file.
 - **Formula diff.** In a changed formula, only the changed parts are marked, for example one subscript, one added term or a changed number. This works for inline formulas (`$…$`) and block formulas (`$$…$$`).
 - **Word diff in paragraphs.** Changed words are marked red on the old side and green on the new side. Bold, italic, links and code stay formatted.
@@ -50,6 +51,12 @@ When the two versions of a formula have too little in common, or the marked form
 - **Code cells and raw blocks:** ```` ```{python} ```` shows as code with a `python` label, and ```` ```{=latex} ```` as a dimmed block with a `raw latex` label. Both are diffed line by line.
 - **Shortcodes:** `{{< … >}}` show as written.
 
+### Quarto preview
+
+![A Quarto file and its preview: numbered sections, resolved cross-references and citations, an equation number, a callout and a figure](images/quarto-preview.png)
+
+VS Code has a preview for Markdown files but not for Quarto files. Click the preview button in the title bar of a `.qmd` editor, press `Ctrl+K V` (`Cmd+K V` on macOS), or right-click a `.qmd` file and choose "Open Quarto Preview to the Side". The preview shows what the diff shows for one side, in one column: everything in the list above, with the same limits. It updates while you type, scrolls with the editor, and follows the active `.qmd` editor. Front matter options such as `number-sections` are not shown.
+
 ## Install
 
 Install "Markdown Rendered Diff" from the Extensions view, or run:
@@ -70,6 +77,7 @@ code --install-extension mdiff.vsix
 
 - **Source Control view:** click a changed `.md` or `.qmd` file. The rendered diff opens next to the source diff.
 - **Diff editor title bar:** the "Show Rendered Diff" button opens the panel for the active diff.
+- **Quarto editor title bar:** the preview button, or `Ctrl+K V`, opens the preview of the `.qmd` file next to it.
 - **Explorer or editor tab context menu:** "Rendered Diff with HEAD" opens the source diff and the rendered diff of a file against `HEAD`.
 - **Source Control context menu:** "Open Changes with Rendered Diff" works also when auto-open is off.
 
@@ -116,11 +124,17 @@ The diff core is in `src/core/` and does not use the VS Code API:
 
 - Quarto: the output of code cells, `{{< include >}}`, Mermaid and Graphviz diagrams, and conditional content (`.content-visible`) are not rendered. `number-sections` and `bibliography` in `_quarto.yml` are not read, only those in the front matter of the file. Citations use one author-date style, not the CSL style of the document, and the reference list is not generated.
 
-- Images with relative paths do not show.
+- Images with relative paths show from the working tree, also on the old side of a diff. Images outside the workspace folders and the folder of the first file shown do not show.
+- Quarto figures (`![caption](path){#fig-x}`) show the image, but not the "Figure N: caption" line or the `width` attribute.
 - Mermaid diagrams and syntax highlighting of code blocks are not supported.
 - A rewritten paragraph that has few words in common with the old one shows as a whole-block change.
 
 ## Changelog
+
+### 0.6.0
+- Quarto preview: a preview button in the title bar of `.qmd` editors, `Ctrl+K V`, and "Open Quarto Preview to the Side" in the context menus. It renders the file in one column with the Quarto support of the diff, updates while you type and scrolls with the editor.
+- Images with relative paths show, in the preview and in the diff.
+- A front matter `date` shows as written, for example `2026-11-16`, not as a full timestamp.
 
 ### 0.5.1
 - A block whose text changed only in white space, for example a re-wrapped paragraph or a double space, is not a change. Before, it counted as a change with nothing marked. A change of indentation in a code block is still a change.
