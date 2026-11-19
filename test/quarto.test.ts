@@ -114,13 +114,14 @@ describe('Quarto rendering', () => {
   it('renders callouts, the reference list, and the content of other divs', () => {
     expect(render('::: {.callout-warning title="Careful"}\nText.\n:::\n')).toContain('<div class="callout callout-warning"><div class="callout-title">Careful</div>\n<p>Text.</p>\n</div>');
     expect(render('::: {#refs}\n:::\n')).toContain('class="quarto-refs"');
-    expect(render(':::: {.panel-tabset}\n::: {.inner}\nA\n:::\n::::\n')).toBe('<div class="panel-tabset">\n<div class="inner">\n<p>A</p>\n</div>\n</div>\n');
+    expect(render(':::: {.panel-tabset}\n::: {.inner}\nA\n:::\n::::\n')).toBe('<div class="panel-tabset"><div class="qdiv-label">Tabs: each heading below is a tab</div>\n<div class="inner">\n<p>A</p>\n</div>\n</div>\n');
   });
 
   it('labels code cells and raw blocks, and shows shortcodes as written', () => {
     expect(render('```{python}\nx = 1\n```\n')).toContain('<div class="qcell"><div class="cell-label">python</div><pre><code class="language-python">x = 1');
     expect(render('```{=latex}\n\\newpage\n```\n')).toContain('<div class="cell-label">raw latex</div>');
-    expect(render('{{< pagebreak >}}\n')).toContain('<code class="shortcode">{{&lt; pagebreak &gt;}}</code>');
+    expect(render('{{< pagebreak >}}\n')).toContain('<span class="pagebreak">page break</span>');
+    expect(render('{{< lipsum 2 >}}\n')).toMatch(/<code class="shortcode" title="Filled in by Quarto[^"]*">\{\{&lt; lipsum 2 &gt;\}\}<\/code>/);
   });
 
   it('removes the attributes of a figure and numbers it', () => {
@@ -177,7 +178,7 @@ describe('Quarto diff', () => {
 
   it('labels a changed code cell', () => {
     const r = diffMarkdown(qmd, '```{r}\nx <- 1\n```\n', '```{r}\nx <- 2\n```\n', options);
-    expect(rows(r.html)[0].right).toMatch(/^<div class="cell-label">r<\/div><pre class="code-diff">/);
+    expect(rows(r.html)[0].right).toMatch(/^<div class="qcell"><div class="cell-label">r<\/div><pre class="code-diff">/);
   });
 
   it('keeps the number of a changed equation', () => {

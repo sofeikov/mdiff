@@ -17,10 +17,14 @@ let lastMerged: { key: string; bib: Bibliography } | undefined;
  * parsed documents that used it.
  */
 export function loadBibliography(docPath: string, source: string): Bibliography | undefined {
+  return loadBibliographyFiles(bibliographyPaths(source).map((p) => resolve(dirname(docPath), p)));
+}
+
+/** The same for BibTeX files given by their paths, for a bibliography that the project names. */
+export function loadBibliographyFiles(paths: string[]): Bibliography | undefined {
   const files: { file: string; mtimeMs: number }[] = [];
-  for (const p of bibliographyPaths(source)) {
-    if (!/\.bib$/i.test(p)) continue;
-    const file = resolve(dirname(docPath), p);
+  for (const file of paths) {
+    if (!/\.bib$/i.test(file)) continue;
     try {
       files.push({ file, mtimeMs: statSync(file).mtimeMs });
     } catch {

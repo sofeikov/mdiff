@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { diffMarkdown } from './core/diff';
-import { loadBibliography } from './bibliography';
+import { loadQuarto } from './project';
 import { createMarkdown, isQuartoPath } from './core/markdown';
 import { buildShell } from './core/page';
 
@@ -20,8 +20,8 @@ const asset = (p: string) => relative(outDir, resolve(root, p));
 const oldSource = readFileSync(oldPath, 'utf8');
 const newSource = readFileSync(newPath, 'utf8');
 const quarto = isQuartoPath(oldPath) || isQuartoPath(newPath);
-const bibliography = quarto ? loadBibliography(newPath, newSource) : undefined;
-const result = diffMarkdown(createMarkdown({ quarto }), oldSource, newSource, { formulaParts: true, bibliography });
+const project = quarto ? loadQuarto(resolve(newPath), newSource) : undefined;
+const result = diffMarkdown(createMarkdown({ quarto }), oldSource, newSource, { formulaParts: true, ...project });
 const html = buildShell({
   cspSource: "'self' file:",
   nonce: 'standalone',

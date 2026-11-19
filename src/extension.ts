@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { loadBibliography } from './bibliography';
+import { loadQuarto } from './project';
 import { diffMarkdown, previewMarkdown } from './core/diff';
 import { createMarkdown, isQuartoPath } from './core/markdown';
 import { buildShell, toRowsMessage, UpdateMessage } from './core/page';
@@ -363,13 +363,13 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
       const md = quarto ? this.qmd : this.md;
       if (preview) {
         const b = await readText(pair.modified);
-        const bibliography = quarto ? loadBibliography(pair.modified.fsPath, b) : undefined;
-        message = { ...base, hunks: 0, added: 0, removed: 0, changed: 0, ...previewMarkdown(md, b, { formulaParts: formulaParts(), bibliography }) };
+        const q = quarto ? loadQuarto(pair.modified.fsPath, b) : undefined;
+        message = { ...base, hunks: 0, added: 0, removed: 0, changed: 0, ...previewMarkdown(md, b, { formulaParts: formulaParts(), ...q }) };
       } else {
         const [a, b] = await Promise.all([readText(pair.original), readText(pair.modified)]);
-        // The bibliography next to the working-tree file is found also for a Git URI.
-        const bibliography = quarto ? loadBibliography(pair.modified.fsPath, b) : undefined;
-        message = { ...base, ...diffMarkdown(md, a, b, { formulaParts: formulaParts(), bibliography }) };
+        // The bibliography and project next to the working-tree file are found also for a Git URI.
+        const q = quarto ? loadQuarto(pair.modified.fsPath, b) : undefined;
+        message = { ...base, ...diffMarkdown(md, a, b, { formulaParts: formulaParts(), ...q }) };
       }
     } catch (error) {
       message = { ...base, html: '', hunks: 0, added: 0, removed: 0, changed: 0, error: `Cannot render the ${preview ? 'preview' : 'diff'}: ${String(error)}` };

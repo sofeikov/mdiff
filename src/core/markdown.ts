@@ -3,7 +3,7 @@ import type { MarkdownIt, Token } from 'markdown-it';
 import katexPlugin from '@vscode/markdown-it-katex';
 import katex from 'katex';
 import yaml from 'js-yaml';
-import { quartoPlugin } from './quarto';
+import { mergeMeta, quartoPlugin, type QuartoContext } from './quarto';
 
 export type { Token };
 
@@ -57,7 +57,11 @@ export interface ParsedDoc {
 
 const FRONT_MATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
 
-/** Parses a document. `env` can hold values for the parser rules, such as the bibliography of a Quarto document. */
+/**
+ * Parses a document. `env` can hold values for the parser rules, such as the bibliography of a
+ * Quarto document and its `quartoContext`, whose project metadata the rules read under the
+ * front matter's (section numbers, `execute:`).
+ */
 export function parseDoc(md: MarkdownIt, source: string, env: Record<string, unknown> = {}): ParsedDoc {
   let body = source;
   let frontMatter: Record<string, unknown> | undefined;
@@ -77,7 +81,8 @@ export function parseDoc(md: MarkdownIt, source: string, env: Record<string, unk
       frontMatterError = String(error);
     }
   }
-  env.frontMatter = frontMatter;
+  const project = (env.quartoContext as QuartoContext | undefined)?.project;
+  env.frontMatter = project ? mergeMeta(project, frontMatter) : frontMatter;
   const tokens = md.parse(body, env);
   return { frontMatter, frontMatterError, frontMatterLines, tokens, env };
 }

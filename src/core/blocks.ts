@@ -1,7 +1,7 @@
 import type { MarkdownIt } from 'markdown-it';
 import yaml from 'js-yaml';
 import type { ParsedDoc, Token } from './markdown';
-import { blockPrefix, divKind, KEY_ENV } from './quarto';
+import { Attrs, blockPrefix, divKind, divNote, KEY_ENV } from './quarto';
 
 /**
  * One block of a rendered document.
@@ -106,7 +106,13 @@ export class BlockBuilder {
       }
       const close = findClose(tokens, i, end);
       if (tok.type === 'quarto_div_open' && divKind(tok).kind === 'plain') {
-        // A div without its own look, such as a tabset: its blocks align one by one.
+        // A div without its own look, such as a tabset: its blocks align one by one, after a
+        // note on what the div does in the document, if it does something.
+        const note = divNote((tok.meta as { attrs: Attrs }).attrs);
+        if (note) {
+          const html = `<div class="qdiv-label">${this.md.utils.escapeHtml(note)}</div>\n`;
+          blocks.push({ kind: 'opaque', type: 'div-note', tokens: [], html, key: html, text: note, lines: tok.map ?? undefined });
+        }
         blocks.push(...this.build(tokens, i + 1, close));
       } else {
         blocks.push(this.compound(tokens, i, close));
