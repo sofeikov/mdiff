@@ -3,6 +3,7 @@ import type { MarkdownIt, Token } from 'markdown-it';
 import katexPlugin from '@vscode/markdown-it-katex';
 import katex from 'katex';
 import yaml from 'js-yaml';
+import { isMermaid, mermaidAttr } from './mermaid';
 import { mergeMeta, quartoPlugin, type QuartoContext } from './quarto';
 
 export type { Token };
@@ -42,8 +43,27 @@ export function createMarkdown(options: { quarto?: boolean } = {}): MarkdownIt {
   };
   const katexOptions = { enableBareBlocks: true, enableFencedBlocks: true, strict: 'ignore', katex: cachedKatex };
   katexPlugin(md, katexOptions as Parameters<typeof katexPlugin>[1]);
+  mermaidPlugin(md, !!options.quarto);
   if (options.quarto) quartoPlugin(md);
   return md;
+}
+
+/**
+ * Marks the Mermaid diagrams (see `mermaid.ts`), after the Quarto rules have read the cells, and
+ * puts their source on their `<pre>`. The Quarto rule for cells renders the code with this rule.
+ */
+function mermaidPlugin(md: MarkdownIt, quarto: boolean): void {
+  md.core.ruler.push('mermaid', (s) => {
+    for (const tok of s.tokens) {
+      if (isMermaid(tok, quarto)) tok.meta = { ...tok.meta, mermaid: true };
+    }
+  });
+  const fence = md.renderer.rules.fence!;
+  md.renderer.rules.fence = (tokens, idx, options, env, self) => {
+    const html = fence(tokens, idx, options, env, self);
+    const attr = mermaidAttr(tokens[idx]);
+    return attr ? html.replace(/^<pre/, `<pre${attr}`) : html;
+  };
 }
 
 export interface ParsedDoc {

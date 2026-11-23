@@ -207,6 +207,15 @@ tr.r-ph > td { padding: 0; height: 1.6em; background: repeating-linear-gradient(
 .cell .qfig figcaption { margin-top: 4px; font-size: 0.95em; }
 .cell .qfig-id { font-size: 0.85em; color: var(--muted); }
 .cell .qcell.diagram .qfig > pre { border-left: 3px solid var(--border); }
+
+/* Mermaid diagrams (src/webview/diagrams.ts): in place of their code, or below code with marked lines. */
+pre.mermaid-source { display: none; }
+.mermaid-diagram { margin: 1em 0; overflow-x: auto; }
+.qfig > .mermaid-diagram { margin: 0; }
+.qfig > pre:not(.mermaid-source) + .mermaid-diagram { margin-top: 8px; }
+.mermaid-error { margin: -0.6em 0 1em; font-size: 0.85em; color: var(--muted); }
+.qfig > .mermaid-error { margin: 4px 0 0; }
+
 /* Inline expressions: the value Quarto computes, shown by the code that computes it. */
 .cell .qexpr { font-size: 0.85em; padding: 0 4px; border: 1px dotted var(--muted); border-radius: 3px; background: transparent; white-space: nowrap; cursor: help; }
 .cell .shortcode-value { border-bottom: 1px dotted var(--muted); }

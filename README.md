@@ -11,6 +11,7 @@ When you click a changed Markdown or Quarto file in the Source Control (Git) vie
 - **Opens with the source diff.** Click a `.md` or `.qmd` file in the Source Control view, and the rendered diff opens next to the source diff. Click another Markdown or Quarto file, and the panel follows. The source diff keeps the focus.
 - **Quarto.** `.qmd` files show section numbers, cross-references, citations, captions, callouts and code cells as Quarto renders them, without running Quarto. A new section that renumbers the others does not mark every reference as changed.
 - **Quarto preview.** A `.qmd` editor gets the same preview button as a Markdown editor. It opens the rendered file next to the editor, with the Quarto features below.
+- **Mermaid diagrams.** A ```` ```mermaid ```` block in Markdown, and a ```` ```{mermaid} ```` cell in Quarto, show the drawn diagram, in the colours of the light or dark theme. Each side of a diff draws its own version. Where the diagram's code changed, the code stays above the diagram with its changed lines marked.
 - **Synced scrolling.** The rendered diff and the source diff editor scroll together. Scroll either one, and the other shows the same part of the file.
 - **Formula diff.** In a changed formula, only the changed parts are marked, for example one subscript, one added term or a changed number. This works for inline formulas (`$…$`) and block formulas (`$$…$$`).
 - **Word diff in paragraphs.** Changed words are marked red on the old side and green on the new side. Bold, italic, links and code stay formatted.
@@ -49,7 +50,7 @@ When the two versions of a formula have too little in common, or the marked form
 - **Citations:** `[@key, p. 3]`, `[see @a; @b]`, `@key` and `-@key` show in the author-date style, for example "(Gelada et al. 2019)". The author names and years come from the BibTeX files of `bibliography:` in the front matter. A key that is not in them shows as `?key`. A citation is compared by its keys, and a changed citation is marked as one unit.
 - **Divs:** callouts (`::: {.callout-note}`) show as boxes. Other divs show their content, with a note on what a tabset, `.content-visible`/`.content-hidden` ("Only in html output"), a margin note or a wider column does. `::: {#refs}` shows a placeholder for the reference list.
 - **Code cells and raw blocks:** ```` ```{python} ```` shows as code with a `python` label, and ```` ```{=latex} ```` as a dimmed block with a `raw latex` label. Both are diffed line by line. Cell options (`#| …`, also `# | …` as code formatters write them) and `execute:` count: code under `echo: false` or `include: false`, or folded with `code-fold`, is folded to one line saying so, and opens by itself when it changed.
-- **Figures and tables of code cells:** `#| label: fig-x` with `fig-cap` shows "Figure N: caption" where the plot will be, numbered with the other figures, and `@fig-x` resolves. A cell with `output: asis` that prints a table counts as that table, by the `{#tbl-x}` it prints or the caption after it. Mermaid and Graphviz cells show their source as the figure.
+- **Figures and tables of code cells:** `#| label: fig-x` with `fig-cap` shows "Figure N: caption" where the plot will be, numbered with the other figures, and `@fig-x` resolves. A cell with `output: asis` that prints a table counts as that table, by the `{#tbl-x}` it prints or the caption after it. Mermaid cells show the drawn diagram as the figure, and Graphviz cells their source. A plain ```` ```mermaid ```` block stays code, as in Quarto.
 - **Inline expressions:** `` `{python} expr` `` shows as a small marked value with the expression in it and the full code on hover.
 - **Project:** the nearest `_quarto.yml` above the file, the `_metadata.yml` files between and `_variables.yml` are read, so `execute:`, `number-sections` and `bibliography` there count.
 - **Shortcodes:** `{{< include >}}` shows the included file in place, `{{< meta >}}` and `{{< var >}}` show their values, `{{< kbd >}}` shows keys, and `{{< pagebreak >}}` and `{{< video >}}` say what they are. Others show as written.
@@ -125,20 +126,24 @@ The diff core is in `src/core/` and does not use the VS Code API:
 - `inline.ts`: the word diff inside a block. Code spans and images are single units. A removed formula and an added formula at the same place pair, and `formula.ts` diffs them.
 - `formula.ts`: the diff inside a formula. It parses the LaTeX into a small tree, aligns the two trees and wraps each changed part in `\htmlClass`.
 - `align.ts`: the sequence alignment that the block, word and formula diffs use.
+- `mermaid.ts`: which code blocks are Mermaid diagrams. The parser puts their source on the `<pre>`, and `src/webview/diagrams.ts` (bundled into `media/mermaid/` with the Mermaid library) draws them in the page. Mermaid runs in a hidden frame and loads only when a page has a diagram.
 - `quarto.ts`: the Quarto syntax: section numbers, cross-references, captions, citations, divs, code cells with their options and figures, inline expressions, shortcodes and includes. Comparison keys render cross-references, citations and figures of cells by their source, so new numbers are not changes.
 
 Outside the core, `project.ts` reads what a Quarto file takes from disk: `_quarto.yml`, `_metadata.yml`, `_variables.yml`, the bibliography (with `bibliography.ts`) and included files.
 
 ## Limits
 
-- Quarto: code cells are not run, so their plots, tables and printed Markdown show as numbered places with their captions, and inline expressions show their code, not their values. Mermaid and Graphviz diagrams show their source. All content for every format is shown, with a note on what is conditional. An included file is rendered by itself, so its sections and figures are numbered apart from the document's. The project files are read from the working tree, also for the old side of a diff. Metadata from an extension's `_extension.yml` and `metadata-files:` is not read. Citations use one author-date style, not the CSL style of the document, and the reference list is not generated.
+- Quarto: code cells are not run, so their plots, tables and printed Markdown show as numbered places with their captions, and inline expressions show their code, not their values. Graphviz diagrams show their source. All content for every format is shown, with a note on what is conditional. An included file is rendered by itself, so its sections and figures are numbered apart from the document's. The project files are read from the working tree, also for the old side of a diff. Metadata from an extension's `_extension.yml` and `metadata-files:` is not read. Citations use one author-date style, not the CSL style of the document, and the reference list is not generated.
 
 - Images with relative paths show from the working tree, also on the old side of a diff. Images outside the workspace folders and the folder of the first file shown do not show.
 - Quarto figures (`![caption](path){#fig-x}`) show the image, but not the "Figure N: caption" line or the `width` attribute.
-- Mermaid and Graphviz diagrams are not drawn, and code blocks are not syntax-highlighted.
+- Graphviz diagrams are not drawn, nor are Mermaid mindmaps and architecture diagrams (the extension ships the smaller Mermaid build without them); these show as code with a note. Code blocks are not syntax-highlighted.
 - A rewritten paragraph that has few words in common with the old one shows as a whole-block change.
 
 ## Changelog
+
+### 0.8.0
+- Mermaid diagrams are drawn: ```` ```mermaid ```` blocks in Markdown and ```` ```{mermaid} ```` cells in Quarto, in the diff and in the Quarto preview. The diagram takes the place of its code, except where the code changed: then the code with its marked lines stays, and each side draws its own version below it. Diagrams follow the light or dark colour theme. A diagram that Mermaid can't read stays code, with the first line of the error.
 
 ### 0.7.0
 - Quarto code cells as the rendered document has them: cell options and `execute:` are read, and code under `echo: false`, `include: false` or `code-fold` is folded to one line; a cell whose code changed opens by itself.

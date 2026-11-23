@@ -279,6 +279,8 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
       katexCss: asset('katex', 'katex.min.css'),
       previewCss: asset('preview.css'),
       previewJs: asset('preview.js'),
+      diagramsJs: asset('mermaid', 'diagrams.js'),
+      mermaidJs: asset('mermaid', 'mermaid.js'),
     });
     panel.webview.onDidReceiveMessage((msg) => this.onMessage(msg));
     panel.onDidDispose(() => {

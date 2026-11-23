@@ -5,6 +5,9 @@ export interface ShellOptions {
   katexCss: string;
   previewCss: string;
   previewJs: string;
+  /** The script that draws Mermaid diagrams, and the Mermaid library, which it loads when a page has a diagram. */
+  diagramsJs: string;
+  mermaidJs: string;
   /** Data to show at once, for the standalone page. The webview sends it in a message instead. */
   initial?: UpdateMessage;
 }
@@ -61,20 +64,23 @@ export function toRowsMessage(message: UpdateMessage, shown: { seq: number; rows
   return { ...rest, rows: patch, seq, base: shown.seq };
 }
 
-/** The HTML page that shows the side-by-side rendered diff. */
+/**
+ * The HTML page that shows the side-by-side rendered diff. `connect-src` is for the Mermaid
+ * library, which the page fetches from the extension's files (see `src/webview/diagrams.ts`).
+ */
 export function buildShell(o: ShellOptions): string {
   const initial = o.initial ? `<script nonce="${o.nonce}">window.__MDIFF_INITIAL__ = ${JSON.stringify(o.initial).replace(/</g, '\\u003c')};</script>` : '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${o.cspSource} https: data:; style-src ${o.cspSource} 'unsafe-inline'; font-src ${o.cspSource} data:; script-src 'nonce-${o.nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${o.cspSource} https: data:; style-src ${o.cspSource} 'unsafe-inline'; font-src ${o.cspSource} data:; connect-src ${o.cspSource}; script-src 'nonce-${o.nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Rendered diff</title>
 <link rel="stylesheet" href="${o.katexCss}">
 <link rel="stylesheet" href="${o.previewCss}">
 </head>
-<body>
+<body data-mermaid="${o.mermaidJs}">
 <header class="bar">
   <span class="file" id="title"></span>
   <span class="stats" id="stats"></span>
@@ -88,6 +94,7 @@ export function buildShell(o: ShellOptions): string {
 <div class="labels"><div class="cell a" id="label-a"></div><div class="cell b" id="label-b"></div></div>
 <main id="content"></main>
 ${initial}
+<script nonce="${o.nonce}" src="${o.diagramsJs}"></script>
 <script nonce="${o.nonce}" src="${o.previewJs}"></script>
 </body>
 </html>`;

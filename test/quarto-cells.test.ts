@@ -55,7 +55,7 @@ describe('Quarto cells, rendered', () => {
     expect(html).toMatch(/<figure class="qfig" id="fig-a"><div class="qfig-ph">Figure made by this cell when the document is rendered<\/div><figcaption><span class="cap-label">Figure 1:<\/span> A <em>plot<\/em> of <a class="xref" href="#tbl-lit">Table 1<\/a><\/figcaption><\/figure>/);
     expect(html).toContain('<span class="cap-label">Table 2</span> <code class="qfig-id">tbl-made</code>');
     expect(html).toContain('<div class="qfig-ph">Table made by this cell when the document is rendered</div></div>\n<p class="tbl-cap" id="tbl-w">');
-    expect(html).toMatch(/<div class="qcell diagram"><div class="cell-label">mermaid diagram · drawn when the document is rendered<\/div><figure class="qfig" id="fig-flow"><pre>/);
+    expect(html).toMatch(/<div class="qcell diagram"><div class="cell-label">mermaid diagram<\/div><figure class="qfig" id="fig-flow"><pre data-mermaid="[^"]+">/);
   });
 
   it('opens hidden code that changed, and does not mark a renumbered figure', () => {

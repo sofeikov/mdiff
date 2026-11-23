@@ -28,6 +28,8 @@ const html = buildShell({
   katexCss: asset('media/katex/katex.min.css'),
   previewCss: asset('media/preview.css'),
   previewJs: asset('media/preview.js'),
+  diagramsJs: asset('media/mermaid/diagrams.js'),
+  mermaidJs: asset('media/mermaid/mermaid.js'),
   initial: {
     type: 'update',
     title: basename(newPath),

@@ -261,6 +261,9 @@
       }
     }
     for (const r of content.querySelectorAll('.row.cur')) r.classList.remove('cur');
+    // Mermaid diagrams (media/mermaid/diagrams.js). One drawn before goes in now, before the scroll
+    // position is restored below.
+    if (window.mdiffDiagrams) window.mdiffDiagrams.draw(content);
     // Rows off screen are not laid out, so the browser would load the KaTeX fonts only when a
     // formula scrolls into view, and show it in a fallback font first. Load the main ones now.
     if (!fontsLoading && content.querySelector('.katex')) {

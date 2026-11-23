@@ -5,6 +5,7 @@ import { Block, BlockBuilder, TableRow } from './blocks';
 import { diffFormula } from './formula';
 import { diffInline, renderInlinePlain } from './inline';
 import { parseDoc } from './markdown';
+import { mermaidAttr } from './mermaid';
 import { Bibliography, cellHtml, eqNumberHtml, fenceLabel, QuartoContext } from './quarto';
 
 /** Paired blocks with a lower similarity than this show as whole-block changes, not as a word diff. */
@@ -149,7 +150,8 @@ class PairRenderer {
   /** A changed code block; a Quarto cell keeps its label, figures and folding, with its code open. */
   private codeBlock(block: Block, lines: string): string {
     const tok = block.tokens[0];
-    const pre = `<pre class="code-diff"><code>${lines}</code></pre>`;
+    // A diagram keeps its source, so the page draws it below the marked lines.
+    const pre = `<pre class="code-diff"${mermaidAttr(tok)}><code>${lines}</code></pre>`;
     return fenceLabel(tok, this.b.md.utils.escapeHtml) ? cellHtml(this.b.md, tok, pre, this.b.env, true) : `${pre}\n`;
   }
 

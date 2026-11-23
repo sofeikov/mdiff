@@ -564,8 +564,10 @@ export function cellHtml(md: MarkdownIt, tok: Token, pre: string, env: Record<st
   const lines = tok.content.replace(/\n$/, '').split('\n').length;
   const lang = esc(cell.lang);
   if (cell.diagram && cell.code !== 'excluded') {
-    // The diagram's source is the nearest thing to the picture, so it stays in view.
-    const head = `<div class="cell-label">${lang} diagram · drawn when the document is rendered</div>`;
+    // The page draws a Mermaid diagram from its source (see `mermaid.ts`). A Graphviz one isn't
+    // drawn, and its source is the nearest thing to the picture, so it stays in view.
+    const drawn = cell.lang.toLowerCase() === 'mermaid';
+    const head = `<div class="cell-label">${lang} diagram${drawn ? '' : ' · drawn when the document is rendered'}</div>`;
     const [t, ...rest] = cell.targets;
     return `<div class="qcell diagram">${head}${t ? target(t, pre) : `<figure class="qfig">${pre}</figure>`}${rest.map((x) => target(x, '')).join('')}</div>\n`;
   }

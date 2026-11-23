@@ -2,7 +2,7 @@
   "name": "mdiff",
   "displayName": "Markdown Rendered Diff",
   "description": "Shows the diff of a Markdown or Quarto file as rendered output, next to the source diff, and a rendered preview of Quarto files.",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "publisher": "KonstantinSofeikov",
   "license": "MIT",
   "repository": {
@@ -148,6 +148,7 @@
     "bench": "node --expose-gc scripts/bench.mjs"
   },
   "dependencies": {
+    "@mermaid-js/tiny": "12.3.0",
     "@vscode/markdown-it-katex": "1.1.2",
     "diff": "9.0.0",
     "js-yaml": "4.3.2",
