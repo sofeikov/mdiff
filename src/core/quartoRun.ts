@@ -203,14 +203,33 @@ export function splitCommand(text: string): string[] {
  * through uv when the project has a `uv.lock`, so the build gets the project's own packages at
  * that version. The kept notebook is what the build is for: `gfm` is the cheapest format to write,
  * and needs none of the project's format extensions. Its output goes to `outDir`, a scratch folder
- * outside the repository. Without freeze, which in a project would write the results of the build
- * into its `_freeze` folder, and without Quarto's kernel daemon, which would stay alive for minutes
- * after the build, out of reach of a cancel.
+ * outside the repository, when given; a build in a copy that is deleted needs none. Without
+ * freeze, which in a project would write the results of the build into its `_freeze` folder, and
+ * without Quarto's kernel daemon, which would stay alive for minutes after the build, out of reach
+ * of a cancel.
  */
-export function quartoCommand(setting: string, file: string, uvProject: boolean, outDir: string): string[] {
+export function quartoCommand(setting: string, file: string, uvProject: boolean, outDir?: string): string[] {
   const words = splitCommand(setting);
   const start = words.length ? words : uvProject ? ['uv', 'run', 'quarto', 'render'] : ['quarto', 'render'];
-  return [...start, file, '--to', 'gfm', '-M', 'keep-ipynb:true', '-M', 'freeze:false', '--no-execute-daemon', '--output-dir', outDir];
+  return [...start, file, '--to', 'gfm', '-M', 'keep-ipynb:true', '-M', 'freeze:false', '--no-execute-daemon', ...(outDir ? ['--output-dir', outDir] : [])];
+}
+
+/**
+ * Whether a path has a folder or file whose name starts with a dot. Quarto leaves such paths out
+ * of a project, and its rule looks at the whole absolute path, not at the part inside the
+ * project: under `~/.config`, where VS Code keeps an extension's storage on Linux, no file is part
+ * of its project, and `--output-dir` fails.
+ */
+export function hiddenPath(path: string): boolean {
+  return /[/\\]\./.test(path);
+}
+
+/** The line of a failed command's output that says why: Quarto's `ERROR:` line, or else its last lines. */
+export function failureLine(output: string): string {
+  // eslint-disable-next-line no-control-regex
+  const lines = output.replace(/\u001b\[[0-9;]*m/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const error = lines.filter((l) => /^(ERROR|Error|error)\b/.test(l)).pop();
+  return (error ?? lines.slice(-2).join(' ')).slice(0, 300);
 }
 
 /** The notebook Quarto kept of a document, among the names in its folder: `x.quarto_ipynb`, or `x.ipynb` before Quarto 1.5. */

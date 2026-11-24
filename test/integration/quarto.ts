@@ -1,7 +1,7 @@
 // The experimental Quarto build, tried for real on the report that scripts/integration.mjs makes
 // when MDIFF_QUARTO_BUILD=1: a preview build, a two-sided diff build, and a cancel.
 import * as assert from 'node:assert/strict';
-import { readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as vscode from 'vscode';
 import type { MdiffApi } from '../../src/extension';
@@ -12,8 +12,11 @@ const BUILD_MS = 240_000;
 /** What a build may leave behind: copies of the document, and the scratch and export folders. */
 function leftovers(folder: string): string[] {
   const here = readdirSync(`${folder}/report`).filter((n) => n.includes('.mdiff-') || n.endsWith('_ipynb') || n === '.quarto');
-  const tmp = readdirSync(tmpdir()).filter((n) => n.startsWith('mdiff-quarto-'));
-  return [...here, ...tmp.map((n) => `${tmpdir()}/${n}`)];
+  const tmp = readdirSync(tmpdir()).filter((n) => n.startsWith('mdiff-quarto-')).map((n) => `${tmpdir()}/${n}`);
+  // The exports of Git versions, in the extension's storage.
+  const exports = `${process.env.MDIFF_TEST_STORAGE}/quarto-builds`;
+  const built = existsSync(exports) ? readdirSync(exports).map((n) => `${exports}/${n}`) : [];
+  return [...here, ...tmp, ...built];
 }
 
 /**
@@ -25,7 +28,7 @@ function buildProcesses(root: string): string[] {
   for (const pid of readdirSync('/proc').filter((n) => /^\d+$/.test(n))) {
     try {
       const cwd = readlinkSync(`/proc/${pid}/cwd`);
-      if (!cwd.startsWith(root) && !cwd.startsWith(`${tmpdir()}/mdiff-quarto-`)) continue;
+      if (!cwd.startsWith(root) && !cwd.startsWith(`${tmpdir()}/mdiff-quarto-`) && !cwd.startsWith(`${process.env.MDIFF_TEST_STORAGE}`)) continue;
       found.push(`${pid} ${readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').trim()} (in ${cwd})`);
     } catch {
       // Gone, or not ours.

@@ -14,7 +14,12 @@ import { resolve } from 'node:path';
 const root = resolve('.');
 const code = process.argv[2] ?? process.env.VSCODE_BIN ?? '/snap/code/current/usr/share/code/code';
 const out = resolve('test/out/integration');
-const ws = resolve(out, 'ws');
+const quartoBuild = process.env.MDIFF_QUARTO_BUILD === '1';
+// The Quarto build is tried under a folder whose name starts with a dot, as VS Code's storage is
+// on Linux (~/.config): Quarto leaves such files out of their project.
+const home = quartoBuild ? resolve(out, '.dot') : out;
+const ws = resolve(home, 'ws');
+const userData = resolve(home, 'user-data');
 
 await esbuild.build({
   entryPoints: ['test/integration/suite.ts'],
@@ -27,7 +32,8 @@ await esbuild.build({
 
 rmSync(ws, { recursive: true, force: true });
 // The results of Quarto builds of an earlier run.
-rmSync(resolve(out, 'user-data', 'User', 'globalStorage', 'konstantinsofeikov.mdiff'), { recursive: true, force: true });
+const storage = resolve(userData, 'User', 'globalStorage', 'konstantinsofeikov.mdiff');
+rmSync(storage, { recursive: true, force: true });
 mkdirSync(ws, { recursive: true });
 const git = (...args) => execFileSync('git', ['-C', ws, ...args], { stdio: 'ignore' });
 git('init', '-q');
@@ -43,7 +49,6 @@ copyFileSync('test/fixtures/quarto-old.qmd', resolve(ws, 'doc.qmd'));
 copyFileSync('test/fixtures/quarto.bib', resolve(ws, 'quarto.bib'));
 // A uv project with a report whose numbers come from a data file, and a report.md of the user's
 // own next to it, which a build must not touch.
-const quartoBuild = process.env.MDIFF_QUARTO_BUILD === '1';
 const fx = (p) => resolve('test/fixtures/quarto-build', p);
 if (quartoBuild) {
   mkdirSync(resolve(ws, 'report'));
@@ -54,6 +59,8 @@ if (quartoBuild) {
   copyFileSync(fx('data/scores.old.csv'), resolve(ws, 'data/scores.csv'));
   writeFileSync(resolve(ws, 'report/report.md'), 'My own report.md\n');
   writeFileSync(resolve(ws, '.gitignore'), '.venv/\n');
+  // A Quarto project, whose files Quarto leaves out under a hidden folder unless it gets another path.
+  writeFileSync(resolve(ws, '_quarto.yml'), 'project:\n  type: default\n');
   execFileSync('uv', ['lock', '-q'], { cwd: ws, stdio: 'inherit' });
 }
 git('add', '.');
@@ -75,7 +82,7 @@ if (!showWindow && !hasXvfb) {
 const [command, prefix] = showWindow ? [code, []] : ['xvfb-run', ['-a', '-s', '-screen 0 1600x1000x24', code]];
 // In a Wayland session, Electron opens its window on Wayland and ignores the virtual X display.
 // Without WAYLAND_DISPLAY, and with the X11 backend, the window stays on the virtual display.
-const env = { ...process.env };
+const env = { ...process.env, MDIFF_TEST_STORAGE: storage };
 if (!showWindow) delete env.WAYLAND_DISPLAY;
 const hidden = showWindow ? [] : ['--ozone-platform=x11'];
 
@@ -84,7 +91,7 @@ const result = spawnSync(command, [
   ws,
   `--extensionDevelopmentPath=${root}`,
   `--extensionTestsPath=${resolve(out, 'suite.js')}`,
-  `--user-data-dir=${resolve(out, 'user-data')}`,
+  `--user-data-dir=${userData}`,
   `--extensions-dir=${resolve(out, 'extensions')}`,
   '--disable-extensions',
   '--disable-workspace-trust',

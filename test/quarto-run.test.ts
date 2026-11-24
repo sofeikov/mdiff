@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { diffMarkdown, previewMarkdown } from '../src/core/diff';
 import { createMarkdown } from '../src/core/markdown';
-import { cellCode, keptNotebook, outputsKey, parseQuartoRun, quartoCommand, readQuartoRun, RunCursor, splitCommand, type QuartoRun } from '../src/core/quartoRun';
+import { cellCode, failureLine, hiddenPath, keptNotebook, outputsKey, parseQuartoRun, quartoCommand, readQuartoRun, RunCursor, splitCommand, type QuartoRun } from '../src/core/quartoRun';
 
 // The fixtures are a small document at two versions, and the notebooks Quarto 1.6 kept of them
 // (`quarto render x.qmd --to gfm -M keep-ipynb:true`).
@@ -70,6 +70,20 @@ describe('the build command', () => {
     expect(quartoCommand('', 'a.qmd', true, '/tmp/o')).toEqual(['uv', 'run', 'quarto', 'render', ...tail]);
     expect(quartoCommand('conda run -n "my env" quarto render', 'a.qmd', true, '/tmp/o')).toEqual(['conda', 'run', '-n', 'my env', 'quarto', 'render', ...tail]);
     expect(splitCommand(`  a 'b c'  "d"  `)).toEqual(['a', 'b c', 'd']);
+  });
+
+  it('has no output folder for a build in a copy that is deleted', () => {
+    expect(quartoCommand('', 'a.qmd', false)).toEqual(['quarto', 'render', 'a.qmd', '--to', 'gfm', '-M', 'keep-ipynb:true', '-M', 'freeze:false', '--no-execute-daemon']);
+  });
+
+  it('knows a path that Quarto leaves out of its project, and reports a failure by its ERROR line', () => {
+    expect(hiddenPath('/home/u/.config/Code/User/globalStorage/x/a.qmd')).toBe(true);
+    expect(hiddenPath('/home/u/repo/.claude/worktrees/w/a.qmd')).toBe(true);
+    expect(hiddenPath('/home/u/my.repo/docs/a.qmd')).toBe(false);
+    expect(hiddenPath('C:\\Users\\u\\.vscode\\a.qmd')).toBe(true);
+    const out = 'Starting\n\u001b[91mERROR: The --output-dir flag can only be used when rendering projects.\u001b[39m\n\nStack trace:\n    at render (file:///x.js:1:1)\n';
+    expect(failureLine(out)).toBe('ERROR: The --output-dir flag can only be used when rendering projects.');
+    expect(failureLine('a\nb\nc\n')).toBe('b c');
   });
 
   it('finds the notebook that Quarto kept', () => {

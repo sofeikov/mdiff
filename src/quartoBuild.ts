@@ -12,8 +12,14 @@
 //   the repository.
 // - A `git:` version is built in a temporary export of the repository at that commit (or of the
 //   index), with its own environment (`uv run`, when the project has a `uv.lock`), so the old side
-//   doesn't import the new code. The export is deleted when its build ends: with the environment
-//   in it, it can take gigabytes.
+//   doesn't import the new code. The export is in the extension's storage, on disk: the system's
+//   temporary folder can be in memory (tmpfs), where uv can't hard-link and copies the whole
+//   environment. The export is deleted when its build ends: with the environment in it, it can
+//   take gigabytes.
+// - Quarto leaves a file out of its project when any folder of its absolute path starts with a
+//   dot (as the extension's storage, `~/.config/...`, does on Linux), and then refuses
+//   `--output-dir`. In such a folder, Quarto gets the file through a link to the repository made
+//   in the system's temporary folder (`aliasOf`).
 //
 // What a build gave is kept by version: the text of the file, or the commit of a `git:` one.
 // When the file changes after the build, the page still shows the build and says it is older.
@@ -21,10 +27,10 @@ import * as vscode from 'vscode';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { keptNotebook, parseQuartoRun, quartoCommand, readQuartoRun, type QuartoRun } from './core/quartoRun';
+import { failureLine, hiddenPath, keptNotebook, parseQuartoRun, quartoCommand, readQuartoRun, type QuartoRun } from './core/quartoRun';
 
 /** A build that takes longer than this is stopped. */
 export const TIME_LIMIT_MINUTES = 30;
@@ -63,6 +69,8 @@ interface Record {
 interface Cleanup {
   /** Files and folders to delete. */
   remove: string[];
+  /** Links to remove, each alone in a folder of its own, which is removed too: never followed. */
+  links?: string[];
   /** `.gitignore` files to restore: their text before the build, or null when there was none. */
   restore: { file: string; text: string | null }[];
 }
@@ -309,8 +317,10 @@ export class QuartoBuilds implements vscode.Disposable {
       await fs.writeFile(copy, text, { flag: 'wx' });
       this.writePending();
       const uv = !!(await findAbove(folder, top, 'uv.lock'));
+      const alias = hiddenPath(folder) ? await this.alias(top, cleanup) : undefined;
       say('Building');
-      const run = await this.render(setting, path.basename(copy), uv, out, folder, process.env, token, deadline, before);
+      const arg = alias ? path.join(alias, path.relative(top, copy)) : path.basename(copy);
+      const run = await this.render(setting, arg, uv, out, folder, process.env, token, deadline, before);
       return { text, run };
     } finally {
       await this.end(cleanup);
@@ -323,14 +333,14 @@ export class QuartoBuilds implements vscode.Disposable {
     const repo = await gitOut(['rev-parse', '--show-toplevel'], path.dirname(q.path));
     const rel = path.relative(repo, q.path);
     if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('the file is not in its repository');
-    const work = await fs.mkdtemp(path.join(os.tmpdir(), 'mdiff-quarto-'));
+    const builds = path.join(this.root, 'quarto-builds');
+    await fs.mkdir(builds, { recursive: true });
+    const work = await fs.mkdtemp(path.join(builds, 'export-'));
     const cleanup: Cleanup = { remove: [work], restore: [] };
     this.begin(cleanup);
     try {
-      const src = path.join(work, path.basename(repo));
-      const out = path.join(work, 'out');
+      const src = path.join(work, path.basename(repo).replace(/^\.+/, '') || 'repo');
       await fs.mkdir(src);
-      await fs.mkdir(out);
       say('Exporting');
       if (q.ref === '' || q.ref === '~') {
         await this.exec(['git', 'checkout-index', '-a', `--prefix=${src}${path.sep}`], repo, process.env, token, deadline);
@@ -351,20 +361,26 @@ export class QuartoBuilds implements vscode.Disposable {
       delete env.VIRTUAL_ENV;
       delete env.UV_PROJECT_ENVIRONMENT;
       const uv = !!(await findAbove(folder, src, 'uv.lock'));
+      const alias = hiddenPath(folder) ? await this.alias(src, cleanup) : undefined;
       say(uv ? 'Building (with the environment of that version)' : 'Building');
-      const run = await this.render(setting, path.basename(file), uv, out, folder, env, token, deadline, new Set(await fs.readdir(folder)));
+      // Quarto's output stays in the export, which is deleted.
+      const arg = alias ? path.join(alias, path.relative(src, file)) : path.basename(file);
+      const run = await this.render(setting, arg, uv, undefined, folder, env, token, deadline, new Set(await fs.readdir(folder)));
       return { text, run };
     } finally {
       await this.end(cleanup);
     }
   }
 
-  /** Runs Quarto on `file` in `folder`, and reads the notebook it kept there: one that wasn't there `before`. */
+  /**
+   * Runs Quarto on `file` (a name in `folder`, or a path to it through a link) in `folder`, and
+   * reads the notebook it kept there: one that wasn't there `before`.
+   */
   private async render(
     setting: string,
     file: string,
     uv: boolean,
-    out: string,
+    out: string | undefined,
     folder: string,
     env: NodeJS.ProcessEnv,
     token: vscode.CancellationToken,
@@ -372,13 +388,35 @@ export class QuartoBuilds implements vscode.Disposable {
     before: Set<string>,
   ): Promise<QuartoRun> {
     await this.exec(quartoCommand(setting, file, uv, out), folder, env, token, deadline);
-    const kept = keptNotebook(file, (await fs.readdir(folder)).filter((n) => !before.has(n)));
+    const kept = keptNotebook(path.basename(file), (await fs.readdir(folder)).filter((n) => !before.has(n)));
     if (!kept) throw new Error('Quarto kept no notebook of the document: only documents run by its Jupyter engine (Python, for one) can be built');
     const notebook = path.join(folder, kept);
     try {
       return readQuartoRun(await fs.readFile(notebook, 'utf8'));
     } finally {
       await fs.rm(notebook, { force: true });
+    }
+  }
+
+  /**
+   * A path to `dir` without a folder that starts with a dot: a link to it in a new folder of the
+   * system's temporary folder, removed with the build's cleanup. Undefined when none can be made;
+   * the build then goes on, and Quarto may build the file without its project.
+   */
+  private async alias(dir: string, cleanup: Cleanup): Promise<string | undefined> {
+    let top: string | undefined;
+    try {
+      top = await fs.mkdtemp(path.join(os.tmpdir(), 'mdiff-quarto-link-'));
+      const link = path.join(top, path.basename(dir).replace(/^\.+/, '') || 'repo');
+      if (hiddenPath(link)) throw new Error('the temporary folder is hidden too');
+      await fs.symlink(dir, link, 'dir');
+      (cleanup.links ??= []).push(link);
+      this.writePending();
+      return link;
+    } catch (e) {
+      if (top) await fs.rmdir(top).catch(() => undefined);
+      this.say(`Note: Quarto leaves out of a project a file under a folder whose name starts with a dot, and no other path to it could be made (${message(e)}). The file is built without its project's settings.`);
+      return undefined;
     }
   }
 
@@ -441,7 +479,7 @@ export class QuartoBuilds implements vscode.Disposable {
         // Without the colours of a terminal, which an output channel and a message show as codes.
         // eslint-disable-next-line no-control-regex
         const text = chunk.toString().replace(/\u001b\[[0-9;]*m/g, '');
-        tail = (tail + text).slice(-600);
+        tail = (tail + text).slice(-8000);
         this.log?.append(text);
       };
       child.stdout.on('data', out);
@@ -487,8 +525,8 @@ export class QuartoBuilds implements vscode.Disposable {
         if (cancelled) end(new Cancelled());
         else if (late) end(new Error(`stopped after ${TIME_LIMIT_MINUTES} minutes`));
         else if (code !== 0) {
-          const last = tail.trim().split('\n').filter((l) => l.trim()).slice(-2).join(' ').slice(-300);
-          end(new Error(`${path.basename(command[0])} ended with code ${code}${last ? `: ${last}` : ''}`));
+          const why = failureLine(tail);
+          end(new Error(`${path.basename(command[0])} ended with code ${code}${why ? `: ${why}` : ''}`));
         } else end();
       });
     });
@@ -582,7 +620,24 @@ function descendants(pid: number): number[] {
   return out;
 }
 
+/** Removes the links of a cleanup and their folders, without following them. */
+function unlinkAll(c: Cleanup): void {
+  for (const link of c.links ?? []) {
+    try {
+      if (lstatSync(link).isSymbolicLink()) unlinkSync(link);
+    } catch {
+      // Gone already.
+    }
+    try {
+      rmdirSync(path.dirname(link));
+    } catch {
+      // Not empty, or gone: left as it is.
+    }
+  }
+}
+
 function undo(c: Cleanup): void {
+  unlinkAll(c);
   for (const r of c.restore) {
     try {
       if (r.text === null) rmSync(r.file, { force: true });
@@ -601,6 +656,7 @@ function undo(c: Cleanup): void {
 }
 
 async function undoAsync(c: Cleanup): Promise<void> {
+  unlinkAll(c);
   for (const r of c.restore) {
     const now = await fs.readFile(r.file, 'utf8').catch(() => null);
     if (now === r.text) continue;
