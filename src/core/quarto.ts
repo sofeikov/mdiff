@@ -1,5 +1,6 @@
 import type { MarkdownIt, RendererRule, StateBlock, StateCore, StateInline, Token } from 'markdown-it';
 import yaml from 'js-yaml';
+import { OPTION_LINE, outputsKey, RunCursor, type QuartoRun, type RunCell, type RunExpr, type RunOutput } from './quartoRun';
 
 /**
  * Quarto syntax on top of Markdown: attributes of headings, section numbers, cross-references,
@@ -7,9 +8,11 @@ import yaml from 'js-yaml';
  * (`#| echo: false`, figure labels and captions), inline expressions, shortcodes and includes.
  * What a document takes from its project (`_quarto.yml` and the rest) is read by `project.ts`.
  *
- * Nothing runs Quarto. The rules imitate the text that Quarto shows, close enough for a review.
- * Numbers and citations are resolved when a document is parsed, one document at a time, so the
- * old and the new side each show their own numbers.
+ * Nothing here runs Quarto. The rules imitate the text that Quarto shows, close enough for a
+ * review. Numbers and citations are resolved when a document is parsed, one document at a time, so
+ * the old and the new side each show their own numbers. When a version was built with Quarto
+ * (`quartoRun.ts`, experimental), its inline expressions show their values and its cells their
+ * outputs, still in the blocks of the source.
  *
  * A diff compares a cross-reference by its id and a citation by its keys, not by the text that
  * they show. A new section changes the numbers of the sections after it, but the references to
@@ -39,6 +42,16 @@ interface QuartoState {
 /** Set in the env when a block is rendered for its comparison key, not for display. */
 export const KEY_ENV = 'mdiffKey';
 
+/**
+ * In the env of a document: what a Quarto build of it computed (`QuartoRun`), and whether the
+ * other version of the diff was built too, so that values and outputs are compared.
+ */
+export const RUN_ENV = 'quartoRun';
+export const COMPARE_ENV = 'quartoCompare';
+
+/** Set in the env to render one cell with its outputs marked as changed (see `CellOutputsDiff`). */
+export const OUTPUTS_ENV = 'mdiffOutputs';
+
 const XREF_PREFIXES: Record<string, string> = {
   sec: 'Section',
   fig: 'Figure',
@@ -62,9 +75,6 @@ const CALLOUTS = new Set(['note', 'tip', 'warning', 'important', 'caution']);
 
 /** Cells whose output is a diagram drawn from their source, not a result of running code. */
 const DIAGRAMS = new Set(['mermaid', 'dot']);
-
-/** A cell option line: `#| key: value`, also `# | ` as code formatters write it, `%%|` and `//|`. */
-const OPTION_LINE = /^[ \t]*(?:#|%%|\/\/|--)[ \t]*\|[ \t]?(.*)$/;
 
 /** A citation key: Pandoc allows some punctuation inside a key, but not at its end. */
 const KEY = /[\p{L}\p{N}_](?:[\p{L}\p{N}_:.#$%&\-+?<>~/]*[\p{L}\p{N}_])?/uy;
@@ -337,6 +347,8 @@ function eqLabelsRule(s: StateCore): void {
  */
 function blocksRule(s: StateCore): void {
   const q = state(s.env);
+  // Made now, before an include copies the env, so that the include takes values from the same cursor.
+  const cursor = runCursor(s.env);
   const tokens = s.tokens;
   const numbered = numberSections(s.env.frontMatter);
   const count: Record<string, number> = {};
@@ -389,7 +401,11 @@ function blocksRule(s: StateCore): void {
       const info = cellInfo(cellLanguage(tok.info)!, tok.content, s.env.frontMatter);
       const targets = info.targets.map((t) => ({ ...t, num: next(t.kind) }));
       for (const t of targets) register(t.id, { prefix: XREF_PREFIXES[t.kind], num: t.num });
-      tok.meta = { ...tok.meta, cell: { ...info, targets } satisfies CellInfo };
+      const run = cursor && info.code !== 'excluded' && !info.diagram ? cursor.cell(tok.content) : undefined;
+      // With a run of both versions, a cell whose outputs changed is a change, whatever its code.
+      const diffKey = cursor && s.env[COMPARE_ENV] ? outputsKey(shownOutputs(info, run)) : undefined;
+      const ran = cursor && !info.diagram ? { ran: true, ...(run ? { run } : {}) } : {};
+      tok.meta = { ...tok.meta, cell: { ...info, targets, ...ran } satisfies CellInfo, ...(diffKey ? { diffKey } : {}) };
     } else if (tok.type === 'paragraph_open' && inline && tokens[i + 2]?.type === 'paragraph_close' && INCLUDE_ALONE.test(inline.content.trim())) {
       // An include on its own line: the included file, rendered in its place.
       tok.type = 'html_block';
@@ -476,6 +492,19 @@ export interface CellInfo {
   targets: CellTarget[];
   /** It writes Markdown and a table caption follows it: the table is what it writes. */
   writesTable?: boolean;
+  /** The document doesn't show the cell's outputs (`output: false`), or its warnings (`warning: false`). */
+  noOutput?: boolean;
+  noWarning?: boolean;
+  /** The document has a run (see quartoRun.ts), and `run` is this cell in it, when it ran. */
+  ran?: boolean;
+  run?: RunCell;
+}
+
+/** How the outputs of a cell differ from the other version's, in a diff of two builds. */
+export interface CellOutputsDiff {
+  changed: boolean;
+  /** The HTML of the outputs that were compared in detail (a table), by their index. */
+  html?: (string | undefined)[];
 }
 
 /** The options of a code cell, from the `#|` lines at its top. Lines that aren't valid YAML give none. */
@@ -513,6 +542,8 @@ export function cellInfo(lang: string, code: string, meta: unknown): Omit<CellIn
           ? 'folded'
           : 'shown';
   const asis = exec('output') === 'asis';
+  const noOutput = exec('output') === false;
+  const noWarning = exec('warning') === false;
   const targets: Omit<CellTarget, 'num'>[] = [];
   if (shows !== 'excluded') {
     const label = typeof o.label === 'string' ? o.label : undefined;
@@ -529,7 +560,63 @@ export function cellInfo(lang: string, code: string, meta: unknown): Omit<CellIn
       }
     }
   }
-  return { lang, code: shows, asis, diagram, targets };
+  return { lang, code: shows, asis, diagram, targets, ...(noOutput ? { noOutput } : {}), ...(noWarning ? { noWarning } : {}) };
+}
+
+/** The outputs of a cell's run that the rendered document shows. */
+export function shownOutputs(cell: Pick<CellInfo, 'code' | 'noOutput' | 'noWarning'>, run: RunCell | undefined): RunOutput[] {
+  if (!run || cell.noOutput || cell.code === 'excluded') return [];
+  return run.outputs.filter((o) => !(cell.noWarning && o.kind === 'stream' && o.name === 'stderr'));
+}
+
+/** The Markdown text of an output, which a diff compares like the document's own: a table a cell writes. */
+export function outputMarkdown(cell: Pick<CellInfo, 'asis'>, o: RunOutput | undefined): string | undefined {
+  return o?.kind === 'markdown' || (o?.kind === 'stream' && cell.asis && o.name !== 'stderr') ? o.text : undefined;
+}
+
+/** HTML of one output of a cell's run. */
+function outputHtml(md: MarkdownIt, o: RunOutput, asis: boolean): string {
+  const esc = md.utils.escapeHtml;
+  const markdown = (text: string) => `<div class="qout-md">${md.render(text, {})}</div>`;
+  switch (o.kind) {
+    case 'markdown':
+      return markdown(o.text);
+    case 'image': {
+      const src = o.mime === 'image/svg+xml' ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(o.data)}` : `data:${esc(o.mime)};base64,${esc(o.data)}`;
+      return `<img class="qout-img" alt="" src="${src}">`;
+    }
+    case 'html':
+      // The page runs no scripts of a document, so an interactive plot can't be drawn here.
+      return /<script[\s>]/i.test(o.html) ? '<div class="qfig-ph">Interactive output: drawn only in the rendered document</div>' : `<div class="qout-html">${o.html}</div>`;
+    case 'stream':
+      // What a cell prints with `output: asis` is Markdown of the document.
+      return asis && o.name !== 'stderr' ? markdown(o.text) : `<pre class="qout-text${o.name === 'stderr' ? ' stderr' : ''}">${esc(o.text.replace(/\n$/, ''))}</pre>`;
+    case 'error':
+      return `<pre class="qout-text error">${esc(o.text)}</pre>`;
+    default:
+      return `<pre class="qout-text">${esc(o.text)}</pre>`;
+  }
+}
+
+/**
+ * The run of the document being parsed, handed out in document order; undefined without one. It
+ * is kept in the env, which an included file's env copies, so the include takes its values from
+ * the same run.
+ */
+function runCursor(env: Record<string, unknown>): RunCursor | undefined {
+  const run = env[RUN_ENV] as QuartoRun | undefined;
+  if (!run) return undefined;
+  return (env.quartoRunCursor ??= new RunCursor(run)) as RunCursor;
+}
+
+/** What an inline expression token carries: its result in the run, and what the diff compares it by. */
+export interface ExprMeta {
+  expr: true;
+  /** The document has a run: `value` is the expression's result in it, if it has one. */
+  ran: boolean;
+  value?: RunExpr;
+  /** Set when both versions have a run: the value, so a number that changed is a change. */
+  diffKey?: string;
 }
 
 /** An inline expression, `` `{python} x` ``: its language, its code, and a short form to show. */
@@ -549,10 +636,15 @@ export function inlineExpr(code: string): { lang: string; expr: string; short: s
  * each figure or table it makes, with its number and caption. `pre` is the highlighted code;
  * `open` unfolds the code, for a cell whose code changed. For a comparison key, a figure shows its
  * id, not its number, so a new figure before it is not a change.
+ *
+ * With a run, the cell's outputs take the place of the placeholders, and `outputs` marks them when
+ * they differ from the other version's. A comparison key has no outputs, only their hash when both
+ * versions were built: a run of one version only is not a change.
  */
-export function cellHtml(md: MarkdownIt, tok: Token, pre: string, env: Record<string, unknown> | undefined, open = false): string {
+export function cellHtml(md: MarkdownIt, tok: Token, pre: string, env: Record<string, unknown> | undefined, open = false, outputs?: CellOutputsDiff): string {
   const esc = md.utils.escapeHtml;
   const cell = (tok.meta as { cell?: CellInfo } | null)?.cell;
+  const key = !!env?.[KEY_ENV];
   const label = fenceLabel(tok, esc);
   if (!cell) return `<div class="qcell${tok.info.trim().startsWith('{=') ? ' raw' : ''}">${label}${pre}</div>\n`;
   const caption = (t: CellTarget) => {
@@ -571,20 +663,51 @@ export function cellHtml(md: MarkdownIt, tok: Token, pre: string, env: Record<st
     const [t, ...rest] = cell.targets;
     return `<div class="qcell diagram">${head}${t ? target(t, pre) : `<figure class="qfig">${pre}</figure>`}${rest.map((x) => target(x, '')).join('')}</div>\n`;
   }
-  const made = cell.targets.map((t) => target(t, `<div class="qfig-ph">${t.kind === 'fig' ? 'Figure' : 'Table'} made by this cell when the document is rendered</div>`));
-  if (cell.asis && !cell.targets.length) {
+  const ran = cell.ran && !key;
+  const made = ran
+    ? ranHtml(md, cell, target, outputs)
+    : cell.targets.map((t) => target(t, `<div class="qfig-ph">${t.kind === 'fig' ? 'Figure' : 'Table'} made by this cell when the document is rendered</div>`));
+  if (!ran && cell.asis && !cell.targets.length) {
     made.push(`<div class="qfig-ph">${cell.writesTable ? 'Table made by this cell when the document is rendered' : 'Writes Markdown into the document when it is rendered'}</div>`);
   }
+  const runKey = key ? (tok.meta as { diffKey?: string } | null)?.diffKey : undefined;
+  if (runKey) made.push(`<!--run ${runKey}-->`);
   if (cell.code === 'shown') return `<div class="qcell">${label}${pre}${made.join('')}</div>\n`;
   const note = { folded: 'folded in the document', hidden: 'not shown in the document', excluded: 'left out of the document' }[cell.code];
   const summary = `<summary class="cell-label">${lang} · ${lines} line${lines === 1 ? '' : 's'} · ${note}</summary>`;
   return `<div class="qcell code-${cell.code}"><details class="qcode"${open ? ' open' : ''}>${summary}${pre}</details>${made.join('')}</div>\n`;
 }
 
-/** Core rule after `inline`: resolves cross-references and citations to their text. */
+/**
+ * What a cell made in the document's run, in place of the placeholders: its outputs, under the
+ * number and caption of its figure or table when it has one. Markdown a cell writes brings its
+ * own captions, so it is shown as it is.
+ */
+function ranHtml(md: MarkdownIt, cell: CellInfo, target: (t: CellTarget, inner: string) => string, diff: CellOutputsDiff | undefined): string[] {
+  const outputs = shownOutputs(cell, cell.run);
+  const changed = diff?.changed ? ' out-chg' : '';
+  const body = outputs.map((o, i) => diff?.html?.[i] ?? outputHtml(md, o, cell.asis)).join('');
+  const [first, ...rest] = cell.targets;
+  if (!outputs.length) {
+    // A labelled cell keeps its place, which a reference scrolls to, and says why it is empty.
+    const why = !cell.run ? 'Not in the Quarto build of this version' : 'No output in the Quarto build';
+    const empty = cell.targets.map((t) => target(t, `<div class="qfig-ph">${why}</div>`));
+    // An output that went away is a change too.
+    return diff?.changed && !empty.length ? [`<div class="qout out-chg"><div class="qfig-ph">${why}</div></div>`] : empty;
+  }
+  if (!first || cell.asis) return [`<div class="qout${changed}"${first ? ` id="${md.utils.escapeHtml(first.id)}"` : ''}>${body}</div>`];
+  return [target(first, `<div class="qout${changed}">${body}</div>`), ...rest.map((t) => target(t, ''))];
+}
+
+/**
+ * Core rule after `inline`: resolves cross-references and citations to their text, and inline
+ * expressions to their values when the document has a run.
+ */
 function resolveRule(s: StateCore): void {
   const q = state(s.env);
   const bib = s.env.bibliography as Bibliography | undefined;
+  // Not for a piece parsed by itself (a title, a caption): Quarto computes only the body's.
+  const cursor = s.inlineMode ? undefined : runCursor(s.env);
   for (const tok of s.tokens) {
     if (tok.type !== 'inline') continue;
     for (const child of tok.children ?? []) {
@@ -608,6 +731,13 @@ function resolveRule(s: StateCore): void {
         meta.missing = r.missing;
       } else if (child.type === 'quarto_shortcode') {
         child.meta = { html: shortcodeHtml(child.content, s.env, s.md.utils.escapeHtml) };
+      } else if (child.type === 'code_inline' && cursor) {
+        const e = inlineExpr(child.content);
+        if (e) {
+          const value = cursor.expr(e.expr);
+          const diffKey = s.env[COMPARE_ENV] ? `=${value?.text ?? ''}` : undefined;
+          child.meta = { expr: true, ran: true, ...(value ? { value } : {}), ...(diffKey !== undefined ? { diffKey } : {}) } satisfies ExprMeta;
+        }
       }
     }
   }
@@ -868,7 +998,18 @@ export function quartoPlugin(md: MarkdownIt): void {
   r.code_inline = (tokens, idx, options, env, self) => {
     const e = inlineExpr(tokens[idx].content);
     if (!e) return codeInline(tokens, idx, options, env, self);
-    return `<code class="qexpr" title="${esc(`Computed when the document is rendered · ${e.lang}: ${e.expr}`)}">${esc(e.short)}</code>`;
+    const meta = tokens[idx].meta as ExprMeta | null;
+    if (env?.[KEY_ENV]) {
+      // Compared by its source, and by its value only when both versions were built.
+      return `<code class="qexpr">${esc(e.expr)}${meta?.diffKey !== undefined ? esc(meta.diffKey) : ''}</code>`;
+    }
+    const value = meta?.value;
+    if (value?.text !== undefined) {
+      // The value reads as text of the sentence; the expression is a hover away.
+      return `<span class="qval" title="${esc(`${e.lang}: ${e.expr}`)}">${value.markdown ? md.renderInline(value.text, {}) : esc(value.text)}</span>`;
+    }
+    const why = meta?.ran ? (value ? 'Failed in the Quarto build' : 'Not in the Quarto build of this version') : 'Computed when the document is rendered';
+    return `<code class="qexpr${meta?.ran ? ' missing' : ''}" title="${esc(`${why} · ${e.lang}: ${e.expr}`)}">${esc(e.short)}</code>`;
   };
   r.quarto_div_open = (tokens, idx) => {
     const tok = tokens[idx];
@@ -892,7 +1033,7 @@ export function quartoPlugin(md: MarkdownIt): void {
     tok.info = /^\{=?([\w.+-]+)/.exec(info.trim())![1];
     const html = fence(tokens, idx, options, env, self);
     tok.info = info;
-    return cellHtml(md, tok, html, env);
+    return cellHtml(md, tok, html, env, false, env?.[OUTPUTS_ENV] as CellOutputsDiff | undefined);
   };
 
   // Section numbers and caption labels, where a block is rendered whole, for example inside a callout.

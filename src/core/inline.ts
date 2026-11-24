@@ -49,7 +49,10 @@ function atomize(builder: BlockBuilder, inline: Token): Atom[] {
     } else {
       const html = builder.renderInline([tok]);
       // A Quarto cross-reference or citation compares by its source, not by its number or text.
-      const shown = tok.type.startsWith('quarto_') ? '' : html;
+      // An inline expression compares by its value when both versions were built, and by its
+      // source otherwise: a value on one side only is not a change.
+      const expr = tok.meta as { expr?: boolean; diffKey?: string } | null;
+      const shown = tok.type.startsWith('quarto_') ? '' : expr?.expr ? (expr.diffKey ?? '') : html;
       const atom: Atom = { key: `${ctxKey}|${tok.type}:${tok.content}:${shown}`, html, ctx, space: false };
       if (tok.type === 'math_inline' || tok.type === 'math_inline_block') {
         // The KaTeX plugin accepts $`…`$ as well as $…$.

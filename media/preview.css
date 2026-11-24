@@ -66,6 +66,29 @@ body {
 .labels .cell { padding: 4px 16px; }
 .labels .cell.a { border-right: 1px solid var(--border); }
 
+/* The experimental Quarto build */
+.qbuild { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
+.qbuild[hidden] { display: none; }
+.qbuild .qb-tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; padding: 0 6px; border: 1px solid var(--border); border-radius: 8px; }
+.qbuild .qb-text { flex: 1 1 300px; min-width: 0; }
+.qbuild .qb-side { display: block; }
+.qbuild .warn { color: var(--vscode-editorWarning-foreground, #9a6700); font-weight: 600; }
+.qbuild .fail { color: var(--vscode-errorForeground, #d1242f); }
+.qbuild .busy { font-style: italic; }
+.qbuild .qb-actions { display: flex; gap: 6px; }
+.qbuild button {
+  font: inherit;
+  color: var(--vscode-button-secondaryForeground, var(--fg));
+  background: var(--vscode-button-secondaryBackground, transparent);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.qbuild button.primary { color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #0969da); border-color: transparent; }
+.qbuild button:disabled { opacity: 0.5; cursor: default; }
+body.preview .qbuild { max-width: 882px; margin: 0 auto; border: 1px solid var(--border); border-top: none; border-radius: 0 0 4px 4px; }
+
 .error { padding: 16px; color: var(--vscode-errorForeground, #d1242f); white-space: pre-wrap; }
 .empty { padding: 16px; color: var(--muted); }
 
@@ -218,6 +241,19 @@ pre.mermaid-source { display: none; }
 
 /* Inline expressions: the value Quarto computes, shown by the code that computes it. */
 .cell .qexpr { font-size: 0.85em; padding: 0 4px; border: 1px dotted var(--muted); border-radius: 3px; background: transparent; white-space: nowrap; cursor: help; }
+/* With a Quarto build: a value reads as text of its sentence, marked as computed by a dotted line. */
+.cell .qexpr.missing { border-style: dashed; opacity: 0.75; }
+.cell .qval { border-bottom: 1px dotted var(--muted); cursor: help; }
+.cell .qout { overflow-x: auto; }
+.cell .qout > :first-child, .cell .qout-md > :first-child { margin-top: 0; }
+.cell .qout > :last-child, .cell .qout-md > :last-child { margin-bottom: 0; }
+.cell .qout-img { max-width: 100%; max-height: 80vh; background: #fff; border-radius: 3px; }
+.cell .qout-text { margin: 2px 0; padding: 4px 8px; font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; }
+.cell .qout-text.error, .cell .qout-text.stderr { color: var(--vscode-errorForeground, #d1242f); }
+/* An output that differs from the other version's. A table has its changed numbers marked, which says more than a tint over all of it. */
+.cell.a .qout.out-chg { padding: 4px 6px; border-radius: 3px; background: var(--del-line); box-shadow: inset 3px 0 var(--del-bar); }
+.cell.b .qout.out-chg { padding: 4px 6px; border-radius: 3px; background: var(--ins-line); box-shadow: inset 3px 0 var(--ins-bar); }
+.cell .qout.out-chg:has(.x-ins, .x-del, .r-chg, .r-ins, .r-del) { background: transparent; box-shadow: none; padding: 0; }
 .cell .shortcode-value { border-bottom: 1px dotted var(--muted); }
 .cell .shortcode.missing { color: var(--vscode-errorForeground, #d1242f); }
 .cell .pagebreak { display: inline-block; font-size: 0.8em; color: var(--muted); border-top: 1px dashed var(--border); padding: 0 8px; }

@@ -4,9 +4,10 @@ import { Alignable, align, similarity } from './align';
 import { Block, BlockBuilder, TableRow } from './blocks';
 import { diffFormula } from './formula';
 import { diffInline, renderInlinePlain } from './inline';
-import { parseDoc } from './markdown';
+import { parseDoc, type Token } from './markdown';
 import { mermaidAttr } from './mermaid';
-import { Bibliography, cellHtml, eqNumberHtml, fenceLabel, QuartoContext } from './quarto';
+import { Bibliography, CellInfo, CellOutputsDiff, cellHtml, COMPARE_ENV, eqNumberHtml, fenceLabel, outputMarkdown, OUTPUTS_ENV, QuartoContext, RUN_ENV, shownOutputs } from './quarto';
+import type { QuartoRun } from './quartoRun';
 
 /** Paired blocks with a lower similarity than this show as whole-block changes, not as a word diff. */
 const MIN_WORD_DIFF_SIMILARITY = 0.25;
@@ -22,6 +23,11 @@ export interface DiffOptions {
   bibliography?: Bibliography;
   /** What a Quarto document takes from its project: metadata, variables, included files. */
   context?: QuartoContext;
+  /**
+   * What a Quarto build of each version computed (see `quartoRun.ts`): `a` the old side, `b` the
+   * new side and the preview. With both, values and outputs that changed are marked.
+   */
+  runs?: { a?: QuartoRun; b?: QuartoRun };
 }
 
 class PairRenderer {
@@ -43,6 +49,12 @@ class PairRenderer {
     }
     // Code that the document doesn't show is folded, but not when it was added or removed.
     return `<div class="b-${mark}">${this.plain(block).replace(/<details class="qcode">/g, '<details class="qcode" open>')}</div>\n`;
+  }
+
+  /** Renders a code block or a cell as it is, with its outputs marked as `outputs` says. */
+  private plainCell(block: Block, outputs: CellOutputsDiff): string {
+    const html = this.b.md.renderer.render(block.tokens, this.b.md.options, { ...this.b.env, [OUTPUTS_ENV]: outputs });
+    return wrapClass(html, block.cls);
   }
 
   pair(a: Block, b: Block): Pair {
@@ -121,6 +133,11 @@ class PairRenderer {
   }
 
   private code(a: Block, b: Block): Pair {
+    const outputs = this.outputs(a.tokens[0], b.tokens[0]);
+    if (outputs && a.tokens[0].content === b.tokens[0].content && a.tokens[0].info === b.tokens[0].info) {
+      // The same code with other outputs: the outputs are marked, and the code stays as it is.
+      return { left: this.plainCell(a, outputs.a), right: this.plainCell(b, outputs.b) };
+    }
     const esc = this.b.md.utils.escapeHtml;
     const lines = (blk: Block) => blk.tokens[0].content.replace(/\n$/, '').split('\n');
     const la = lines(a);
@@ -144,15 +161,41 @@ class PairRenderer {
         ib += n;
       }
     }
-    return { left: this.codeBlock(a, left), right: this.codeBlock(b, right) };
+    return { left: this.codeBlock(a, left, outputs?.a), right: this.codeBlock(b, right, outputs?.b) };
   }
 
   /** A changed code block; a Quarto cell keeps its label, figures and folding, with its code open. */
-  private codeBlock(block: Block, lines: string): string {
+  private codeBlock(block: Block, lines: string, outputs?: CellOutputsDiff): string {
     const tok = block.tokens[0];
     // A diagram keeps its source, so the page draws it below the marked lines.
     const pre = `<pre class="code-diff"${mermaidAttr(tok)}><code>${lines}</code></pre>`;
-    return fenceLabel(tok, this.b.md.utils.escapeHtml) ? cellHtml(this.b.md, tok, pre, this.b.env, true) : `${pre}\n`;
+    return fenceLabel(tok, this.b.md.utils.escapeHtml) ? cellHtml(this.b.md, tok, pre, this.b.env, true, outputs) : `${pre}\n`;
+  }
+
+  /**
+   * How the outputs of two paired cells differ, when both versions were built and they do.
+   * Tables written as Markdown are compared like the document's own, so the changed numbers are
+   * marked. Undefined when there is nothing to mark.
+   */
+  private outputs(ta: Token, tb: Token): { a: CellOutputsDiff; b: CellOutputsDiff } | undefined {
+    const ca = (ta.meta as { cell?: CellInfo } | null)?.cell;
+    const cb = (tb.meta as { cell?: CellInfo } | null)?.cell;
+    const ka = (ta.meta as { diffKey?: string } | null)?.diffKey;
+    const kb = (tb.meta as { diffKey?: string } | null)?.diffKey;
+    if (!ca?.ran || !cb?.ran || !ka || !kb || ka === kb) return undefined;
+    const outA = shownOutputs(ca, ca.run);
+    const outB = shownOutputs(cb, cb.run);
+    const a: CellOutputsDiff = { changed: true, html: [] };
+    const b: CellOutputsDiff = { changed: true, html: [] };
+    outA.forEach((o, i) => {
+      const x = outputMarkdown(ca, o);
+      const y = outputMarkdown(cb, outB[i]);
+      if (x === undefined || y === undefined || x === y) return;
+      const d = diffFragment(this.b.md, x, y, this.options.formulaParts);
+      a.html![i] = `<div class="qout-md">${d.left}</div>`;
+      b.html![i] = `<div class="qout-md">${d.right}</div>`;
+    });
+    return { a, b };
   }
 
   private table(a: Block, b: Block): Pair {
@@ -263,6 +306,40 @@ interface Side {
   units: Unit[];
   bibliography: Bibliography | undefined;
   context: QuartoContext | undefined;
+  run: QuartoRun | undefined;
+  compare: boolean;
+}
+
+/**
+ * The diff of two pieces of Markdown that are not a document's own, such as two tables that a
+ * cell wrote in two builds: the HTML of each side, without rows.
+ */
+function diffFragment(md: MarkdownIt, x: string, y: string, formulaParts: boolean): Pair {
+  const units = (src: string) => {
+    const doc = parseDoc(md, src, {});
+    const builder = new BlockBuilder(md, doc.env);
+    return { builder, units: toUnits(builder.documentBlocks(doc)) };
+  };
+  const sa = units(x);
+  const sb = units(y);
+  const render = new PairRenderer(sb.builder, { formulaParts });
+  let left = '';
+  let right = '';
+  for (const op of align(sa.units, sb.units)) {
+    if (op.op === 'eq') {
+      left += wrapUnit(op.a, render.plain(op.a.block));
+      right += wrapUnit(op.b, render.plain(op.b.block));
+    } else if (op.op === 'chg') {
+      const p = render.pair(op.a.block, op.b.block);
+      left += wrapUnit(op.a, p.left);
+      right += wrapUnit(op.b, p.right);
+    } else if (op.op === 'del') {
+      left += wrapUnit(op.a, render.marked(op.a.block, 'del'));
+    } else {
+      right += wrapUnit(op.b, render.marked(op.b.block, 'ins'));
+    }
+  }
+  return { left, right };
 }
 
 /** The most sides that one parser keeps. */
@@ -274,22 +351,25 @@ const SIDE_CACHE_SIZE = 4;
  */
 const sideCache = new WeakMap<MarkdownIt, Map<string, Side>>();
 
-function parseSide(md: MarkdownIt, source: string, { bibliography, context }: DiffOptions): Side {
+function parseSide(md: MarkdownIt, source: string, { bibliography, context, runs }: DiffOptions, which: 'a' | 'b', preview = false): Side {
   let cache = sideCache.get(md);
   if (!cache) {
     cache = new Map();
     sideCache.set(md, cache);
   }
+  const run = runs?.[which];
+  // Values and outputs are compared only when both versions were built.
+  const compare = !preview && !!runs?.a && !!runs?.b;
   const hit = cache.get(source);
-  if (hit && hit.bibliography === bibliography && hit.context === context) {
+  if (hit && hit.bibliography === bibliography && hit.context === context && hit.run === run && hit.compare === compare) {
     // The most recently used side goes last, so the oldest is evicted first.
     cache.delete(source);
     cache.set(source, hit);
     return hit;
   }
-  const doc = parseDoc(md, source, { bibliography, quartoContext: context });
+  const doc = parseDoc(md, source, { bibliography, quartoContext: context, [RUN_ENV]: run, [COMPARE_ENV]: compare });
   const builder = new BlockBuilder(md, doc.env);
-  const side = { builder, units: toUnits(builder.documentBlocks(doc)), bibliography, context };
+  const side = { builder, units: toUnits(builder.documentBlocks(doc)), bibliography, context, run, compare };
   cache.delete(source);
   cache.set(source, side);
   if (cache.size > SIDE_CACHE_SIZE) cache.delete(cache.keys().next().value!);
@@ -298,8 +378,8 @@ function parseSide(md: MarkdownIt, source: string, { bibliography, context }: Di
 
 /** Diffs two Markdown sources and returns the rows of the side-by-side view. */
 export function diffMarkdown(md: MarkdownIt, oldSource: string, newSource: string, options: DiffOptions = { formulaParts: true }): DiffResult {
-  const sideA = parseSide(md, oldSource, options);
-  const sideB = parseSide(md, newSource, options);
+  const sideA = parseSide(md, oldSource, options, 'a');
+  const sideB = parseSide(md, newSource, options, 'b');
   // Link references resolve at parse time, so one renderer serves both sides.
   const render = new PairRenderer(sideB.builder, options);
   const ops = align(sideA.units, sideB.units);
@@ -372,7 +452,7 @@ export interface PreviewResult {
  * of a diff. Each row has the source lines of its block, for the scroll sync with the editor.
  */
 export function previewMarkdown(md: MarkdownIt, source: string, options: DiffOptions = { formulaParts: true }): PreviewResult {
-  const side = parseSide(md, source, options);
+  const side = parseSide(md, source, options, 'b', true);
   const render = new PairRenderer(side.builder, options);
   const rows = side.units.map((unit) => {
     const lines = unit.block.lines ? ` data-b="${unit.block.lines[0]},${unit.block.lines[1]}"` : '';

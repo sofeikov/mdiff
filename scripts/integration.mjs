@@ -3,6 +3,9 @@
 //
 // The test window runs on a hidden virtual display (xvfb-run), so that it does not cover
 // other windows or take the focus. Set MDIFF_SHOW_WINDOW=1 to run it on the real display.
+//
+// MDIFF_QUARTO_BUILD=1 also tries the experimental Quarto build (test/integration/quarto.ts) on a
+// small Python report. It needs Quarto and uv, and makes the report's environment with uv.
 import * as esbuild from 'esbuild';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -23,6 +26,8 @@ await esbuild.build({
 });
 
 rmSync(ws, { recursive: true, force: true });
+// The results of Quarto builds of an earlier run.
+rmSync(resolve(out, 'user-data', 'User', 'globalStorage', 'konstantinsofeikov.mdiff'), { recursive: true, force: true });
 mkdirSync(ws, { recursive: true });
 const git = (...args) => execFileSync('git', ['-C', ws, ...args], { stdio: 'ignore' });
 git('init', '-q');
@@ -36,10 +41,30 @@ const withTail = (fixture) => readFileSync(fixture, 'utf8') + tail;
 writeFileSync(resolve(ws, 'doc.md'), withTail('test/fixtures/old.md'));
 copyFileSync('test/fixtures/quarto-old.qmd', resolve(ws, 'doc.qmd'));
 copyFileSync('test/fixtures/quarto.bib', resolve(ws, 'quarto.bib'));
+// A uv project with a report whose numbers come from a data file, and a report.md of the user's
+// own next to it, which a build must not touch.
+const quartoBuild = process.env.MDIFF_QUARTO_BUILD === '1';
+const fx = (p) => resolve('test/fixtures/quarto-build', p);
+if (quartoBuild) {
+  mkdirSync(resolve(ws, 'report'));
+  mkdirSync(resolve(ws, 'data'));
+  copyFileSync(fx('pyproject.toml'), resolve(ws, 'pyproject.toml'));
+  copyFileSync(fx('report/report.qmd'), resolve(ws, 'report/report.qmd'));
+  copyFileSync(fx('report/metrics.py'), resolve(ws, 'report/metrics.py'));
+  copyFileSync(fx('data/scores.old.csv'), resolve(ws, 'data/scores.csv'));
+  writeFileSync(resolve(ws, 'report/report.md'), 'My own report.md\n');
+  writeFileSync(resolve(ws, '.gitignore'), '.venv/\n');
+  execFileSync('uv', ['lock', '-q'], { cwd: ws, stdio: 'inherit' });
+}
 git('add', '.');
 git('-c', 'user.name=test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'old');
 writeFileSync(resolve(ws, 'doc.md'), withTail('test/fixtures/new.md'));
 copyFileSync('test/fixtures/quarto-new.qmd', resolve(ws, 'doc.qmd'));
+if (quartoBuild) {
+  // New data, and one more sentence: the first paragraph's source stays the same.
+  copyFileSync(fx('data/scores.new.csv'), resolve(ws, 'data/scores.csv'));
+  writeFileSync(resolve(ws, 'report/report.qmd'), readFileSync(fx('report/report.qmd'), 'utf8') + '\nThe numbers come from the scores file.\n');
+}
 
 const showWindow = process.env.MDIFF_SHOW_WINDOW === '1';
 const hasXvfb = spawnSync('sh', ['-c', 'command -v xvfb-run'], { stdio: 'ignore' }).status === 0;

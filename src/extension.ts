@@ -3,7 +3,8 @@ import * as vscode from 'vscode';
 import { loadQuarto } from './project';
 import { diffMarkdown, previewMarkdown } from './core/diff';
 import { createMarkdown, isQuartoPath } from './core/markdown';
-import { buildShell, toRowsMessage, UpdateMessage } from './core/page';
+import { buildShell, QuartoStatus, toRowsMessage, UpdateMessage } from './core/page';
+import { canBuild, QuartoBuilds, type BuildSide, type BuildState } from './quartoBuild';
 
 const MARKDOWN_FILE = /\.(md|markdown|mdown|mkd|mkdn|qmd)$/i;
 /** The files that get a preview. VS Code previews Markdown itself. */
@@ -26,16 +27,30 @@ export interface MdiffApi {
   readonly lastSynced: number | undefined;
   /** Sends a scroll to the webview as if the reader made it: to an offset, or to the first row with a text. Only for the tests. */
   testScroll(to: number | string): void;
+  /** The state of the Quarto build that the page shows, as last posted. */
+  readonly lastQuarto: QuartoStatus | undefined;
+  /** Does what the page's buttons of the Quarto build do. Only for the tests. */
+  testQuarto(action: 'build' | 'cancel'): void;
   /** The same state for the preview panel of a Quarto file. */
   readonly preview: Omit<MdiffApi, 'preview'>;
 }
 
 export function activate(context: vscode.ExtensionContext): MdiffApi {
-  const preview = new RenderedDiffController(context, 'preview');
-  const controller = new RenderedDiffController(context, 'diff', preview);
+  const builds = new QuartoBuilds(context.globalStorageUri.fsPath);
+  const preview = new RenderedDiffController(context, 'preview', builds);
+  const controller = new RenderedDiffController(context, 'diff', builds, preview);
   context.subscriptions.push(
     controller,
     preview,
+    builds,
+    builds.onDidChange(() => {
+      controller.refresh();
+      preview.refresh();
+    }),
+    vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      controller.refresh();
+      preview.refresh();
+    }),
     vscode.window.onDidChangeActiveTextEditor((e) => preview.onActiveEditor(e)),
     vscode.window.tabGroups.onDidChangeTabs((e) => controller.onTabsChanged(e)),
     vscode.workspace.onDidChangeTextDocument((e) => {
@@ -55,6 +70,11 @@ export function activate(context: vscode.ExtensionContext): MdiffApi {
     vscode.commands.registerCommand('mdiff.showRenderedDiff', (uri?: vscode.Uri) => controller.showForActiveTab(uri)),
     vscode.commands.registerCommand('mdiff.openChange', (...states: unknown[]) => controller.openChange(states)),
     vscode.commands.registerCommand('mdiff.compareWithHead', (uri?: vscode.Uri) => controller.compareWithHead(uri)),
+    vscode.commands.registerCommand('mdiff.buildWithQuarto', () => {
+      const target = [preview, controller].find((c) => c.panelActive) ?? [preview, controller].find((c) => c.panelVisible && c.isQuarto);
+      if (target?.isQuarto) void target.buildQuarto();
+      else void vscode.window.showInformationMessage('Open the Quarto preview or the rendered diff of a Quarto file first.');
+    }),
   );
   // A Markdown diff can be open already when VS Code starts.
   const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
@@ -111,13 +131,49 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
   /** The rows that the webview shows, as last posted, and their number. */
   private shownRows: { seq: number; rows: string[] } | undefined;
   private seq = 0;
+  lastQuarto: QuartoStatus | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly mode: 'diff' | 'preview',
+    private readonly builds: QuartoBuilds,
     /** The preview controller, which the API exposes for the tests. */
     private readonly previewController?: RenderedDiffController,
   ) {}
+
+  get panelActive(): boolean {
+    return !!this.panel?.active;
+  }
+
+  /** True when the panel shows a Quarto file. */
+  get isQuarto(): boolean {
+    return !!this.pair && (isQuartoPath(this.pair.original.path) || isQuartoPath(this.pair.modified.path));
+  }
+
+  /** The versions that the page shows, to build: the new one first, which is read most. */
+  private buildSides(): BuildSide[] {
+    const pair = this.pair;
+    if (!pair) return [];
+    if (this.mode === 'preview') return [{ uri: pair.modified, label: path.basename(pair.modified.fsPath) }];
+    const sides = [
+      { uri: pair.modified, label: `the new version (${describe(pair.modified)})` },
+      { uri: pair.original, label: `the old version (${describe(pair.original)})` },
+    ];
+    return sides.filter((s, i) => i === 0 || s.uri.toString() !== sides[0].uri.toString());
+  }
+
+  /** Builds the versions that the page shows with Quarto. Only from a click (or the command). */
+  async buildQuarto(): Promise<void> {
+    const sides = this.buildSides();
+    // The working-tree file is built as it is saved.
+    const dirty = sides.some((s) => s.uri.scheme === 'file' && vscode.workspace.textDocuments.some((d) => d.uri.toString() === s.uri.toString() && d.isDirty));
+    if (dirty) void vscode.window.showInformationMessage('The file has unsaved changes: the Quarto build uses the saved file.');
+    await this.builds.build(sides);
+  }
+
+  testQuarto(action: 'build' | 'cancel'): void {
+    this.onMessage({ type: action === 'build' ? 'quartoBuild' : 'quartoCancel' });
+  }
 
   get preview(): Omit<MdiffApi, 'preview'> {
     return this.previewController ?? this;
@@ -289,6 +345,7 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
       this.pair = undefined;
       this.lastMessage = undefined;
       this.lastRendered = undefined;
+      this.lastQuarto = undefined;
       this.ready = false;
     });
     return panel;
@@ -322,6 +379,12 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
       this.lastRendered = { rows: msg.rows ?? 0, parsed: msg.parsed ?? 0, lastRow: msg.lastRow ?? '', grid: !!msg.grid, katexFont: msg.katexFont ?? '', fonts: msg.fonts ?? [] };
     } else if (msg.type === 'open' && msg.href) {
       void this.openLink(msg.href);
+    } else if (msg.type === 'quartoBuild') {
+      void this.buildQuarto();
+    } else if (msg.type === 'quartoCancel') {
+      this.builds.cancel();
+    } else if (msg.type === 'quartoLog') {
+      this.builds.showLog();
     }
   }
 
@@ -342,6 +405,20 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     const wire = toRowsMessage(message, this.shownRows, ++this.seq);
     this.shownRows = message.error ? undefined : { seq: wire.seq, rows: message.rows ?? [] };
     void this.panel.webview.postMessage(wire);
+    if (this.lastQuarto) void this.panel.webview.postMessage(this.lastQuarto);
+  }
+
+  /** What the page says of the Quarto build of its versions. */
+  private quartoStatus(sides: { uri: vscode.Uri; label: string; state: BuildState }[]): QuartoStatus {
+    const mine = sides.some((s) => this.builds.isBuilding(s.uri));
+    return {
+      type: 'quarto',
+      show: true,
+      trusted: vscode.workspace.isTrusted,
+      building: mine ? this.builds.building : undefined,
+      busy: !mine && !!this.builds.building,
+      sides: sides.map((s) => ({ label: s.label, status: s.state.status, builtAt: s.state.builtAt, error: s.state.error })),
+    };
   }
 
   private async render(reset: boolean): Promise<void> {
@@ -360,24 +437,37 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
       preview,
       baseUrl: folder && `${folder.replace(/\/$/, '')}/`,
     };
+    let quartoStatus: QuartoStatus | undefined;
     try {
       const quarto = isQuartoPath(pair.original.path) || isQuartoPath(pair.modified.path);
       const md = quarto ? this.qmd : this.md;
+      // What a Quarto build of each version computed, when one was made (experimental).
+      const state = async (uri: vscode.Uri, text: string): Promise<BuildState> => (quarto && canBuild(uri) ? this.builds.state(uri, text) : { status: 'unsupported' });
       if (preview) {
         const b = await readText(pair.modified);
         const q = quarto ? loadQuarto(pair.modified.fsPath, b) : undefined;
-        message = { ...base, hunks: 0, added: 0, removed: 0, changed: 0, ...previewMarkdown(md, b, { formulaParts: formulaParts(), ...q }) };
+        const sb = await state(pair.modified, b);
+        if (quarto) quartoStatus = this.quartoStatus([{ uri: pair.modified, label: 'Document', state: sb }]);
+        message = { ...base, hunks: 0, added: 0, removed: 0, changed: 0, ...previewMarkdown(md, b, { formulaParts: formulaParts(), ...q, runs: { b: sb.run } }) };
       } else {
         const [a, b] = await Promise.all([readText(pair.original), readText(pair.modified)]);
         // The bibliography and project next to the working-tree file are found also for a Git URI.
         const q = quarto ? loadQuarto(pair.modified.fsPath, b) : undefined;
-        message = { ...base, ...diffMarkdown(md, a, b, { formulaParts: formulaParts(), ...q }) };
+        const [sa, sb] = await Promise.all([state(pair.original, a), state(pair.modified, b)]);
+        if (quarto) {
+          quartoStatus = this.quartoStatus([
+            { uri: pair.original, label: base.labelA, state: sa },
+            { uri: pair.modified, label: base.labelB, state: sb },
+          ]);
+        }
+        message = { ...base, ...diffMarkdown(md, a, b, { formulaParts: formulaParts(), ...q, runs: { a: sa.run, b: sb.run } }) };
       }
     } catch (error) {
       message = { ...base, html: '', hunks: 0, added: 0, removed: 0, changed: 0, error: `Cannot render the ${preview ? 'preview' : 'diff'}: ${String(error)}` };
     }
     // A newer request replaced this one while the files were read.
     if (pair !== this.pair || !this.panel) return;
+    this.lastQuarto = quartoStatus ?? { type: 'quarto', show: false, trusted: true, sides: [] };
     this.lastMessage = message;
     if (this.ready) this.post(message);
     else this.queued = message;

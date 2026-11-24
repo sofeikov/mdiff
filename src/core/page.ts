@@ -33,6 +33,21 @@ export interface UpdateMessage {
   baseUrl?: string;
 }
 
+/** What the page says of the Quarto build of the versions that it shows (experimental). */
+export interface QuartoStatus {
+  type: 'quarto';
+  /** False for a page that isn't of a Quarto file: no build bar. */
+  show: boolean;
+  /** False in an untrusted workspace, where a build can't run. */
+  trusted: boolean;
+  /** What a build of this page's versions is doing, while it runs. */
+  building?: string;
+  /** Another page's build is running. */
+  busy?: boolean;
+  /** Each version: the old one first. */
+  sides: { label: string; status: 'none' | 'built' | 'stale' | 'unsupported'; builtAt?: number; error?: string }[];
+}
+
 /**
  * What the extension posts to the webview for an update: the rows, each as HTML or as the
  * index of an equal row in the rows that the webview shows already. On a live update most rows
@@ -92,6 +107,7 @@ export function buildShell(o: ShellOptions): string {
   </span>
 </header>
 <div class="labels"><div class="cell a" id="label-a"></div><div class="cell b" id="label-b"></div></div>
+<div class="qbuild" id="qbuild" hidden></div>
 <main id="content"></main>
 ${initial}
 <script nonce="${o.nonce}" src="${o.diagramsJs}"></script>

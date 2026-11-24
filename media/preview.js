@@ -292,6 +292,60 @@
     }
   }
 
+  /**
+   * The bar of the experimental Quarto build: what each version's build gave, and the buttons. A
+   * build runs the document's code, so it starts only from the Build button.
+   */
+  function quarto(msg) {
+    const bar = $('qbuild');
+    bar.hidden = !msg.show || !vscode;
+    if (bar.hidden) return;
+    const time = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const span = (cls, text) => {
+      const el = document.createElement('span');
+      if (cls) el.className = cls;
+      el.textContent = text;
+      return el;
+    };
+    const button = (label, type, title, primary, disabled) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.title = title;
+      if (primary) b.className = 'primary';
+      b.disabled = !!disabled;
+      b.addEventListener('click', () => vscode.postMessage({ type }));
+      return b;
+    };
+    const text = document.createElement('span');
+    text.className = 'qb-text';
+    const actions = document.createElement('span');
+    actions.className = 'qb-actions';
+    const one = msg.sides.length === 1;
+    const built = msg.sides.some((s) => s.status === 'built' || s.status === 'stale');
+    if (msg.building) {
+      text.append(span('busy', `Building with Quarto: ${msg.building}`));
+      actions.append(button('Cancel', 'quartoCancel', 'Stop the build', true), button('Log', 'quartoLog', 'Show the output of Quarto'));
+    } else {
+      for (const s of msg.sides) {
+        const line = document.createElement('span');
+        line.className = 'qb-side';
+        const who = one ? '' : `${s.label}: `;
+        if (s.status === 'built') line.append(span('', `${who}${one ? 'Values, tables and figures from the' : 'from the'} Quarto build at ${time(s.builtAt)}.`));
+        else if (s.status === 'stale') line.append(span('warn', `${who}${one ? 'The' : 'the'} file has changed since the Quarto build at ${time(s.builtAt)}: what it shows may be out of date.`));
+        else if (s.status === 'unsupported') line.append(span('', `${who}${one ? 'This' : 'this'} version can't be built.`));
+        else line.append(span('', one ? 'Inline values, tables and figures show as placeholders. A Quarto build runs the code of the document to fill them in.' : `${who}not built.`));
+        if (s.error) line.append(' ', span('fail', `The last build failed: ${s.error}`));
+        text.append(line);
+      }
+      if (!one && built) text.append(span('qb-side', 'Values and outputs that changed are marked when both versions are built.'));
+      if (!msg.trusted) text.append(span('qb-side warn', 'A build runs code, so it is off in an untrusted workspace.'));
+      const what = one ? 'Runs the code of the document with Quarto, in its folder' : 'Runs the code of both versions with Quarto: the working tree in its folder, a Git version in a temporary export of the repository';
+      actions.append(button(built ? 'Build again' : 'Build with Quarto', 'quartoBuild', what, !built, !msg.trusted || msg.busy));
+      if (built || msg.sides.some((s) => s.error)) actions.append(button('Log', 'quartoLog', 'Show the output of Quarto'));
+    }
+    bar.replaceChildren(span('qb-tag', 'Experimental'), text, actions);
+  }
+
   $('next').addEventListener('click', () => step(1));
   $('prev').addEventListener('click', () => step(-1));
   only.addEventListener('change', () => setOnly(only.checked));
@@ -322,6 +376,7 @@
     const msg = e.data;
     if (!msg) return;
     if (msg.type === 'update') update(msg);
+    else if (msg.type === 'quarto') quarto(msg);
     else if (msg.type === 'scroll') scrollToLine(msg.line);
     // Only the tests send this: a scroll as if the reader made it, to an offset or to the
     // first row that contains a text.

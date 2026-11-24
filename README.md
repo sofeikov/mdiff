@@ -11,6 +11,7 @@ When you click a changed Markdown or Quarto file in the Source Control (Git) vie
 - **Opens with the source diff.** Click a `.md` or `.qmd` file in the Source Control view, and the rendered diff opens next to the source diff. Click another Markdown or Quarto file, and the panel follows. The source diff keeps the focus.
 - **Quarto.** `.qmd` files show section numbers, cross-references, citations, captions, callouts and code cells as Quarto renders them, without running Quarto. A new section that renumbers the others does not mark every reference as changed.
 - **Quarto preview.** A `.qmd` editor gets the same preview button as a Markdown editor. It opens the rendered file next to the editor, with the Quarto features below.
+- **Quarto build (experimental).** On request, a `.qmd` file is built with Quarto, and the preview and the diff show the values of its inline expressions and the tables and figures of its cells instead of placeholders. With both versions built, a number that changed is marked even where the text around it is the same.
 - **Mermaid diagrams.** A ```` ```mermaid ```` block in Markdown, and a ```` ```{mermaid} ```` cell in Quarto, show the drawn diagram, in the colours of the light or dark theme. Each side of a diff draws its own version. Where the diagram's code changed, the code stays above the diagram with its changed lines marked.
 - **Synced scrolling.** The rendered diff and the source diff editor scroll together. Scroll either one, and the other shows the same part of the file.
 - **Formula diff.** In a changed formula, only the changed parts are marked, for example one subscript, one added term or a changed number. This works for inline formulas (`$…$`) and block formulas (`$$…$$`).
@@ -61,6 +62,17 @@ When the two versions of a formula have too little in common, or the marked form
 
 VS Code has a preview for Markdown files but not for Quarto files. Click the preview button in the title bar of a `.qmd` editor, press `Ctrl+K V` (`Cmd+K V` on macOS), or right-click a `.qmd` file and choose "Open Quarto Preview to the Side". The preview shows what the diff shows for one side, in one column: everything in the list above, with the same limits. It updates while you type, scrolls with the editor, and follows the active `.qmd` editor. Front matter options such as `number-sections` are not shown.
 
+### Quarto build (experimental)
+
+Without a build, every inline expression shows as a code chip and every table or figure that a cell makes shows as a placeholder, and a report full of numbers is hard to read. A Quarto build fills them in. It runs the document's code, so it starts only when you click **Build with Quarto** in the bar at the top of the preview or the rendered diff (or run "Build with Quarto (Experimental)"), never by itself, and never in an untrusted workspace.
+
+- **What it shows:** each inline expression shows its value as text of the sentence, with the expression on hover. Each cell shows its outputs under its figure or table number and caption: a table written as Markdown (`display(Markdown(...))`, `output: asis`), a plot, printed text, an HTML table, an error. `output: false`, `include: false` and `warning: false` are respected. The page is still rendered from the source, so the scroll sync keeps its lines. Values are matched to the source by their text in document order; a piece that the build has not shows "Not in the Quarto build of this version".
+- **The preview** builds the saved file in its own folder, so its data files and imports are found. Quarto writes next to the file it renders, so the build renders a copy, `name.mdiff-1a2b3c4d.qmd`, in the same folder, which you see in the Explorer while it runs. The copy, the notebook Quarto keeps, a `.quarto` folder it made and its change to `.gitignore` are removed when the build ends; Quarto's output goes to a temporary folder. Unsaved changes are not in the build.
+- **The rendered diff** builds both versions. The working-tree file is built as above. A Git version (`HEAD`, a commit, the index) is built in a temporary export of the repository at that version, with its own environment, so the old side runs the old code and data; the export is deleted when its build ends. With both versions built, a value, a table cell or an output that changed is marked even where the source is the same. With one version built, its values show and nothing is marked for them.
+- **The command:** `quarto render FILE --to gfm -M keep-ipynb:true -M freeze:false --no-execute-daemon --output-dir TEMP`, run in the file's folder, through `uv run` when a `uv.lock` is in the folder or above it (in the repository), so the build uses the project's environment; an export gets an environment of its own that way. The setting `mdiff.quarto.command` replaces the part before the file name, for example `conda run -n reports quarto render`.
+- **Results** are kept by version: by the file's text, and by the commit for a Git version. When the file changes after a build, the page keeps the values and says plainly that the file has changed since the build. Results are deleted 30 days after their build.
+- **While it runs**, the bar and a notification show what it does and have a Cancel button. Cancel, the time limit of 30 minutes and closing the window stop Quarto and the Jupyter kernel it started, and remove the copy and the temporary folders. The full output of each build is in the "Markdown Rendered Diff: Quarto" output channel (the bar's **Log** button). A build that fails leaves the page as it was and says why.
+
 ## Install
 
 Install "Markdown Rendered Diff" from the Extensions view, or run:
@@ -102,6 +114,7 @@ The panel updates when you edit the file.
 | `mdiff.autoOpen` | `true` | Open the rendered diff when a diff of a Markdown file opens. |
 | `mdiff.scrollSync` | `true` | Scroll the rendered diff and the source diff editor together. |
 | `mdiff.formulaDiff` | `parts` | `parts`: mark only the changed parts of a formula. `whole`: mark the whole formula. |
+| `mdiff.quarto.command` | empty | Experimental. The command of a Quarto build up to the file name, for example `conda run -n reports quarto render`. Empty: `quarto render`, through `uv run` when the project has a `uv.lock`. Not read in an untrusted workspace. |
 
 ## Development
 
@@ -109,7 +122,7 @@ The panel updates when you edit the file.
 |---|---|
 | `npm run build` | Bundle the extension and the CLI into `dist/`. |
 | `npm test` | Run the unit tests of the diff core. |
-| `npm run test:integration` | Start VS Code with the extension and test it against a temporary Git repository. The test window runs on a hidden display, so `xvfb-run` must be installed (`sudo apt install xvfb`). In a Wayland session, the window uses the X11 backend, so it also stays hidden there. Set `MDIFF_SHOW_WINDOW=1` to run it on your display instead. Set `VSCODE_BIN` to the VS Code (Electron) binary if it is not at `/snap/code/current/usr/share/code/code`. |
+| `npm run test:integration` | Start VS Code with the extension and test it against a temporary Git repository. The test window runs on a hidden display, so `xvfb-run` must be installed (`sudo apt install xvfb`). In a Wayland session, the window uses the X11 backend, so it also stays hidden there. Set `MDIFF_SHOW_WINDOW=1` to run it on your display instead. Set `VSCODE_BIN` to the VS Code (Electron) binary if it is not at `/snap/code/current/usr/share/code/code`. Set `MDIFF_QUARTO_BUILD=1` to also try the Quarto build for real on a small Python report (`test/fixtures/quarto-build/`): a preview build, a cancel, a build of both versions and a failing build, with checks that no process or file is left. It needs Quarto and uv. |
 | `npm run screenshots` | Take the README screenshots of `docs/demo/` in VS Code on a hidden display, and save them in `images/`. It needs `Xvfb`, `xwd`, `xdotool` and Python with Pillow. |
 | `npm run bench -- [--before REF] [--runs N] OLD.md NEW.md ...` | Compare the speed of the diff core at a git ref (default `HEAD`) with the working tree. It shows the mean time difference and its 95% confidence interval for a first render (cold) and for a live update (warm): a new edit of the new file each time, with the same parser. |
 | `node dist/cli.js OLD.md NEW.md OUT.html` | Write the rendered diff of two files to an HTML page. If either file is a `.qmd` file, the Quarto syntax is read. |
@@ -127,13 +140,16 @@ The diff core is in `src/core/` and does not use the VS Code API:
 - `formula.ts`: the diff inside a formula. It parses the LaTeX into a small tree, aligns the two trees and wraps each changed part in `\htmlClass`.
 - `align.ts`: the sequence alignment that the block, word and formula diffs use.
 - `mermaid.ts`: which code blocks are Mermaid diagrams. The parser puts their source on the `<pre>`, and `src/webview/diagrams.ts` (bundled into `media/mermaid/` with the Mermaid library) draws them in the page. Mermaid runs in a hidden frame and loads only when a page has a diagram.
-- `quarto.ts`: the Quarto syntax: section numbers, cross-references, captions, citations, divs, code cells with their options and figures, inline expressions, shortcodes and includes. Comparison keys render cross-references, citations and figures of cells by their source, so new numbers are not changes.
+- `quarto.ts`: the Quarto syntax: section numbers, cross-references, captions, citations, divs, code cells with their options and figures, inline expressions, shortcodes and includes. Comparison keys render cross-references, citations and figures of cells by their source, so new numbers are not changes. With a Quarto build, it shows values and outputs; comparison keys hold them only when both versions were built.
+- `quartoRun.ts`: reads a Quarto build from the notebook that Quarto keeps (`keep-ipynb`): the value of each inline expression (`user_expressions`) and the outputs of each cell, and hands them to the source in document order.
 
-Outside the core, `project.ts` reads what a Quarto file takes from disk: `_quarto.yml`, `_metadata.yml`, `_variables.yml`, the bibliography (with `bibliography.ts`) and included files.
+Outside the core, `project.ts` reads what a Quarto file takes from disk: `_quarto.yml`, `_metadata.yml`, `_variables.yml`, the bibliography (with `bibliography.ts`) and included files. `quartoBuild.ts` runs the Quarto build: the only code in the extension that runs the user's code.
 
 ## Limits
 
-- Quarto: code cells are not run, so their plots, tables and printed Markdown show as numbered places with their captions, and inline expressions show their code, not their values. Graphviz diagrams show their source. All content for every format is shown, with a note on what is conditional. An included file is rendered by itself, so its sections and figures are numbered apart from the document's. The project files are read from the working tree, also for the old side of a diff. Metadata from an extension's `_extension.yml` and `metadata-files:` is not read. Citations use one author-date style, not the CSL style of the document, and the reference list is not generated.
+- Quarto build (experimental): only documents run by Quarto's Jupyter engine (Python, for one) can be built; knitr (R) keeps no notebook. An HTML output with scripts, such as a Plotly figure, is not drawn and keeps a placeholder. A piece that Quarto reads differently from the source (an expression written in another way) keeps its placeholder. The export of a Git version has only what Git has: data files that are not committed, submodules and Git LFS files are missing there, and its environment is made again each time (fast with uv's cache). A result is matched by the file's text, so a change of a data file alone does not make it older. If VS Code is killed during a build, the build runs to its end and the next window removes the copy it left; a normal close stops it. The kernel is found by a mark in its environment on Linux, and by the process tree elsewhere; cancelling was tested on Linux only.
+
+- Quarto: code cells are not run unless you build the file (experimental), so their plots, tables and printed Markdown show as numbered places with their captions, and inline expressions show their code, not their values. Graphviz diagrams show their source. All content for every format is shown, with a note on what is conditional. An included file is rendered by itself, so its sections and figures are numbered apart from the document's. The project files are read from the working tree, also for the old side of a diff. Metadata from an extension's `_extension.yml` and `metadata-files:` is not read. Citations use one author-date style, not the CSL style of the document, and the reference list is not generated.
 
 - Images with relative paths show from the working tree, also on the old side of a diff. Images outside the workspace folders and the folder of the first file shown do not show.
 - Quarto figures (`![caption](path){#fig-x}`) show the image, but not the "Figure N: caption" line or the `width` attribute.
@@ -141,6 +157,9 @@ Outside the core, `project.ts` reads what a Quarto file takes from disk: `_quart
 - A rewritten paragraph that has few words in common with the old one shows as a whole-block change.
 
 ## Changelog
+
+### 0.9.0
+- Quarto build (experimental): a **Build with Quarto** button on the preview and the rendered diff of a `.qmd` file runs the document with Quarto and shows the values of its inline expressions and the tables, plots and printed output of its cells instead of placeholders. The diff builds both versions, the old one in a temporary export of the repository with its own environment, and marks a value or a table cell that changed even where the source is the same. Builds start only from a click, not in an untrusted workspace, can be cancelled, stop after 30 minutes, and log to an output channel. New setting `mdiff.quarto.command`.
 
 ### 0.8.0
 - Mermaid diagrams are drawn: ```` ```mermaid ```` blocks in Markdown and ```` ```{mermaid} ```` cells in Quarto, in the diff and in the Quarto preview. The diagram takes the place of its code, except where the code changed: then the code with its marked lines stays, and each side draws its own version below it. Diagrams follow the light or dark colour theme. A diagram that Mermaid can't read stays code, with the first line of the error.

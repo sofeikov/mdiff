@@ -2,8 +2,9 @@
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import type { MdiffApi } from '../../src/extension';
+import { quartoBuildSteps } from './quarto';
 
-async function waitFor<T>(what: string, get: () => T | undefined | false, timeoutMs = 20000): Promise<T> {
+export async function waitFor<T>(what: string, get: () => T | undefined | false, timeoutMs = 20000): Promise<T> {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
     const value = get();
@@ -131,4 +132,7 @@ async function steps(): Promise<void> {
   await qmdEditor.edit((e) => e.insert(new vscode.Position(qmdEditor.document.lineCount, 0), '\nA preview paragraph.\n'));
   await waitFor('the preview to update', () => api.preview.lastMessage?.html.includes('A preview paragraph'));
   await vscode.commands.executeCommand('workbench.action.files.revert');
+
+  // 7. The experimental Quarto build, when asked for.
+  if (process.env.MDIFF_QUARTO_BUILD === '1') await quartoBuildSteps(api, folder);
 }
