@@ -3,6 +3,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { diffMarkdown, previewMarkdown } from '../src/core/diff';
 import { createMarkdown } from '../src/core/markdown';
+import { frameDocument, frameScripts, needsFrame, scriptsOnly, withoutRunIds } from '../src/core/outputFrame';
+import { integrityHolds } from '../src/outputScripts';
+import { createHash } from 'node:crypto';
 import { cellCode, failureLine, hiddenPath, keptNotebook, outputsKey, parseQuartoRun, quartoCommand, readQuartoRun, RunCursor, splitCommand, type QuartoRun } from '../src/core/quartoRun';
 
 // The fixtures are a small document at two versions, and the notebooks Quarto 1.6 kept of them
@@ -133,7 +136,7 @@ describe('a document with a run', () => {
     expect(partial).toMatch(/<div class="qfig-ph">Not in the Quarto build of this version<\/div>/);
   });
 
-  it('respects output: false, include: false, warning: false and output: asis, and draws no interactive output', () => {
+  it('respects output: false, include: false, warning: false and output: asis, and puts an interactive output in a frame, not in the page', () => {
     const src = [
       '```{python}', '#| output: false', 'x', '```', '',
       '```{python}', '#| include: false', 'z', '```', '',
@@ -152,11 +155,22 @@ describe('a document with a run', () => {
       ],
     };
     const html = preview(src, run);
-    expect(html).not.toMatch(/>hidden<|>excluded<|a warning|draw\(\)/);
+    expect(html).not.toMatch(/>hidden<|>excluded<|a warning/);
     expect(html).toMatch(/<pre class="qout-text">printed<\/pre>/);
     expect(html).toMatch(/<div class="qout"><div class="qout-md"><p><strong>bold<\/strong> text<\/p>/);
-    expect(html).toMatch(/Interactive output: drawn only in the rendered document/);
+    // The output's HTML is there for the page to make a frame of, encoded: nothing of it is markup of the page.
+    expect(html).not.toMatch(/<script/);
+    const holder = /<div class="qout-frame" data-frame="([^"]*)">/.exec(html);
+    expect(decodeURIComponent(holder?.[1] ?? '')).toBe('<div id="p"></div><script>draw()</script>');
     expect(html).toMatch(/<div class="qout-html"><table>/);
+  });
+
+  it('leaves out an output of scripts alone, which shows nothing', () => {
+    const setup = '\n<script>window.PlotlyConfig = {};</script>\n<script type="module">import "https://cdn.plot.ly/plotly-4.1.1.min.js"</script>\n';
+    const run: QuartoRun = { exprs: [], cells: [{ code: 'fig.show()', outputs: [{ kind: 'html', html: setup, text: '' }, { kind: 'html', html: '<div id="f"></div><script>draw()</script>', text: '' }] }] };
+    const html = preview('```{python}\nfig.show()\n```\n', run);
+    expect(html.match(/qout-frame/g)?.length).toBe(1);
+    expect(html).not.toMatch(/PlotlyConfig/);
   });
 
   it('with a run of both versions, marks a value that changed though its source did not', () => {
@@ -197,5 +211,78 @@ describe('a document with a run', () => {
     expect(d.changed).toBe(1);
     expect(diff().changed).toBe(1);
     expect(diff(baseRun, headRun).changed).toBeGreaterThan(1);
+  });
+});
+
+describe('interactive outputs', () => {
+  const qmd = createMarkdown({ quarto: true });
+  const PLOTLY = (id: string, y: number[]) => '<div style="height:440px; width:100%;">'
+    + '<script>window.PlotlyConfig = {MathJaxConfig: \'local\'};</script>\n'
+    + '<script charset="utf-8" src="https://cdn.plot.ly/plotly-3.0.1.min.js" integrity="sha256-abc=" crossorigin="anonymous"></script>'
+    + `<div id="${id}" class="plotly-graph-div" style="height:100%; width:100%;"></div>`
+    + `<script>if (document.getElementById("${id}")) { Plotly.newPlot("${id}", [{"y":${JSON.stringify(y)}}], {}, {"responsive": true}) }</script></div>`;
+
+  it('need a frame when they have a script, and load the scripts they name over https', () => {
+    expect(needsFrame('<table><tr><td>1</td></tr></table>')).toBe(false);
+    expect(needsFrame(PLOTLY('a', [1]))).toBe(true);
+    expect(scriptsOnly(PLOTLY('a', [1]))).toBe(false);
+    expect(scriptsOnly('<style>p {}</style><script>x()</script><!-- y -->')).toBe(true);
+    expect(scriptsOnly('<table><tr><td>1</td></tr></table>')).toBe(false);
+    expect(frameScripts(PLOTLY('a', [1]))).toEqual([{ url: 'https://cdn.plot.ly/plotly-3.0.1.min.js', integrity: 'sha256-abc=' }]);
+    // Each once, `//host` as https, and nothing that isn't on the web over https.
+    expect(
+      frameScripts('<script src="//cdn.jsdelivr.net/npm/vega@5?a=1&amp;b=2"></script><script src=\'https://cdn.plot.ly/x.js\'></script><script src="https://cdn.plot.ly/x.js"></script><script src="http://example.org/a.js"></script><script src="lib/b.js"></script><script src="file:///etc/passwd"></script>'),
+    ).toEqual([{ url: 'https://cdn.jsdelivr.net/npm/vega@5?a=1&b=2' }, { url: 'https://cdn.plot.ly/x.js' }]);
+  });
+
+  it('get a frame document that gives every script the nonce, with the downloaded ones in as text', () => {
+    const lib = 'window.Plotly = { newPlot: function () { return "</script><!-- x -->"; } };';
+    const doc = frameDocument(PLOTLY('fig1', [1, 2]), new Map([['https://cdn.plot.ly/plotly-3.0.1.min.js', lib]]), 'N0nce', 7);
+    // No script without the nonce, and none that the frame would have to load.
+    const scripts = [...doc.matchAll(/<script\b([^>]*)>/g)].map((m) => m[1]);
+    expect(scripts.length).toBe(4);
+    expect(scripts.every((a) => / nonce="N0nce"/.test(a) && !/src=/.test(a))).toBe(true);
+    // The library's text can't end its script element early.
+    expect(doc).toContain('return "<\\/script><\\!-- x -->"; } };</script><div id="fig1"');
+    expect(doc).toContain('Plotly.newPlot("fig1", [{"y":[1,2]}]');
+    expect(doc).toMatch(/parent\.postMessage\(\{ mdiffFrame: 7, height: h \}, '\*'\)/);
+    expect(doc).toMatch(/^<!DOCTYPE html>/);
+  });
+
+  it('leave out a script that could not be downloaded, or is not on the web', () => {
+    const doc = frameDocument('<script src="https://cdn.example.org/a.js"></script><script src="lib/b.js"></script><script type="module">go()</script>', new Map(), 'n', 1);
+    expect(doc).not.toMatch(/a\.js|b\.js/);
+    expect(doc).toMatch(/<script nonce="n" type="module">go\(\)<\/script>/);
+  });
+
+  it('are the same in two runs that differ only in the id the library made up', () => {
+    const a = PLOTLY('99a5c6d6-316c-4570-a5c7-584093b1c791', [1, 2]);
+    const b = PLOTLY('bff3fcf1-736d-46de-9f4a-04470445c0b3', [1, 2]);
+    const c = PLOTLY('1a739377-c29a-4a3f-aee8-911051efe7cf', [1, 3]);
+    expect(withoutRunIds(a)).toBe(withoutRunIds(b));
+    const key = (html: string) => outputsKey([{ kind: 'html', html, text: '' }]);
+    expect(key(a)).toBe(key(b));
+    expect(key(a)).not.toBe(key(c));
+
+    const src = '```{python}\n#| echo: false\nshow(fig)\n```\n';
+    const run = (html: string): QuartoRun => ({ exprs: [], cells: [{ code: 'show(fig)', outputs: [{ kind: 'html', html, text: '' }] }] });
+    const diff = (x: string, y: string) => diffMarkdown(qmd, src, src, { formulaParts: true, runs: { a: run(x), b: run(y) } });
+    const same = diff(a, b);
+    expect(same.changed).toBe(0);
+    expect(same.rows.join('')).not.toMatch(/out-chg/);
+    const changed = diff(a, c);
+    expect(changed.changed).toBe(1);
+    expect(changed.rows.join('')).toMatch(/<div class="qout out-chg"><div class="qout-frame"[^]*<div class="qout out-chg"><div class="qout-frame"/);
+  });
+
+  it('take a downloaded script only with the hash the output expects, when it gives one', () => {
+    const bytes = new TextEncoder().encode('window.x = 1;');
+    const hash = (alg: string) => `${alg}-${createHash(alg).update(bytes).digest('base64')}`;
+    expect(integrityHolds(undefined, bytes)).toBe(true);
+    expect(integrityHolds(hash('sha256'), bytes)).toBe(true);
+    expect(integrityHolds(`sha384-AAAA ${hash('sha512')}`, bytes)).toBe(true);
+    expect(integrityHolds(hash('sha256'), new TextEncoder().encode('window.x = 2;'))).toBe(false);
+    // A hash of a kind we don't know says nothing either way.
+    expect(integrityHolds('md5-AAAA', bytes)).toBe(true);
   });
 });

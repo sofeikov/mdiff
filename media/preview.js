@@ -200,6 +200,9 @@
     let cursor = content.firstChild;
     for (const el of els) {
       if (el === cursor) cursor = cursor.nextSibling;
+      // A row that stays is moved with moveBefore where the browser has it: insertBefore would
+      // load the frames of interactive outputs in it again.
+      else if (el.isConnected && content.moveBefore) content.moveBefore(el, cursor);
       else content.insertBefore(el, cursor);
     }
     while (cursor) {
@@ -264,6 +267,8 @@
     // Mermaid diagrams (media/mermaid/diagrams.js). One drawn before goes in now, before the scroll
     // position is restored below.
     if (window.mdiffDiagrams) window.mdiffDiagrams.draw(content);
+    // Interactive outputs of a Quarto build, each in a sandboxed frame (media/frames/frames.js).
+    if (window.mdiffFrames) window.mdiffFrames.place(content);
     // Rows off screen are not laid out, so the browser would load the KaTeX fonts only when a
     // formula scrolls into view, and show it in a fallback font first. Load the main ones now.
     if (!fontsLoading && content.querySelector('.katex')) {
@@ -372,10 +377,20 @@
     }
     vscode.postMessage({ type: 'open', href });
   });
+  if (window.mdiffFrames) {
+    window.mdiffFrames.init(
+      vscode ? (scripts) => vscode.postMessage({ type: 'outputScripts', scripts }) : undefined,
+      (height) => vscode && vscode.postMessage({ type: 'frameShown', height }),
+    );
+  }
   window.addEventListener('message', (e) => {
+    // A script of the document, in the frame of an interactive output, can post here too: only
+    // the extension's messages count.
+    if (window.mdiffFrames && window.mdiffFrames.fromFrame(e)) return;
     const msg = e.data;
     if (!msg) return;
     if (msg.type === 'update') update(msg);
+    else if (msg.type === 'outputScript') window.mdiffFrames && window.mdiffFrames.reply(msg.url, { text: msg.text, error: msg.error });
     else if (msg.type === 'quarto') quarto(msg);
     else if (msg.type === 'scroll') scrollToLine(msg.line);
     // Only the tests send this: a scroll as if the reader made it, to an offset or to the

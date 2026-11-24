@@ -5,6 +5,8 @@ import { diffMarkdown, previewMarkdown } from './core/diff';
 import { createMarkdown, isQuartoPath } from './core/markdown';
 import { buildShell, QuartoStatus, toRowsMessage, UpdateMessage } from './core/page';
 import { canBuild, QuartoBuilds, type BuildSide, type BuildState } from './quartoBuild';
+import { OutputScripts } from './outputScripts';
+import type { FrameScript } from './core/outputFrame';
 
 const MARKDOWN_FILE = /\.(md|markdown|mdown|mkd|mkdn|qmd)$/i;
 /** The files that get a preview. VS Code previews Markdown itself. */
@@ -27,6 +29,8 @@ export interface MdiffApi {
   readonly lastSynced: number | undefined;
   /** Sends a scroll to the webview as if the reader made it: to an offset, or to the first row with a text. Only for the tests. */
   testScroll(to: number | string): void;
+  /** The heights of the frames of interactive outputs that the page drew, as each was laid out. */
+  readonly lastFrames: number[];
   /** The state of the Quarto build that the page shows, as last posted. */
   readonly lastQuarto: QuartoStatus | undefined;
   /** Does what the page's buttons of the Quarto build do. Only for the tests. */
@@ -37,8 +41,9 @@ export interface MdiffApi {
 
 export function activate(context: vscode.ExtensionContext): MdiffApi {
   const builds = new QuartoBuilds(context.globalStorageUri.fsPath);
-  const preview = new RenderedDiffController(context, 'preview', builds);
-  const controller = new RenderedDiffController(context, 'diff', builds, preview);
+  const scripts = new OutputScripts(context.globalStorageUri.fsPath);
+  const preview = new RenderedDiffController(context, 'preview', builds, scripts);
+  const controller = new RenderedDiffController(context, 'diff', builds, scripts, preview);
   context.subscriptions.push(
     controller,
     preview,
@@ -132,11 +137,14 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
   private shownRows: { seq: number; rows: string[] } | undefined;
   private seq = 0;
   lastQuarto: QuartoStatus | undefined;
+  lastFrames: number[] = [];
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly mode: 'diff' | 'preview',
     private readonly builds: QuartoBuilds,
+    /** The scripts that interactive outputs load from the web, downloaded for the page. */
+    private readonly scripts: OutputScripts,
     /** The preview controller, which the API exposes for the tests. */
     private readonly previewController?: RenderedDiffController,
   ) {}
@@ -336,6 +344,7 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
       previewCss: asset('preview.css'),
       previewJs: asset('preview.js'),
       diagramsJs: asset('mermaid', 'diagrams.js'),
+      framesJs: asset('frames', 'frames.js'),
       mermaidJs: asset('mermaid', 'mermaid.js'),
     });
     panel.webview.onDidReceiveMessage((msg) => this.onMessage(msg));
@@ -346,6 +355,7 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
       this.lastMessage = undefined;
       this.lastRendered = undefined;
       this.lastQuarto = undefined;
+      this.lastFrames = [];
       this.ready = false;
     });
     return panel;
@@ -358,7 +368,7 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
     if (editor) this.onEditorScrolled(editor);
   }
 
-  private onMessage(msg: { type: string; href?: string; rows?: number; parsed?: number; lastRow?: string; grid?: boolean; katexFont?: string; fonts?: string[]; line?: number; top?: number }): void {
+  private onMessage(msg: { type: string; href?: string; rows?: number; parsed?: number; lastRow?: string; grid?: boolean; katexFont?: string; fonts?: string[]; line?: number; top?: number; scripts?: unknown; height?: number }): void {
     if (msg.type === 'ready') {
       this.ready = true;
       this.shownRows = undefined;
@@ -385,7 +395,26 @@ class RenderedDiffController implements MdiffApi, vscode.Disposable {
       this.builds.cancel();
     } else if (msg.type === 'quartoLog') {
       this.builds.showLog();
+    } else if (msg.type === 'outputScripts' && Array.isArray(msg.scripts)) {
+      void this.sendScripts(msg.scripts);
+    } else if (msg.type === 'frameShown' && typeof msg.height === 'number') {
+      this.lastFrames.push(msg.height);
     }
+  }
+
+  /**
+   * Downloads the scripts that an interactive output of a Quarto build loads from the web, for
+   * the frame the page draws it in. Only a Quarto file's page has such outputs.
+   */
+  private async sendScripts(list: unknown[]): Promise<void> {
+    const panel = this.panel;
+    if (!panel || !this.isQuarto) return;
+    const wanted = list.slice(0, 20).filter((x): x is FrameScript => !!x && typeof (x as FrameScript).url === 'string');
+    await Promise.all(wanted.map(async (script) => {
+      const result = await this.scripts.get(script);
+      if ('error' in result) this.builds.note(`Couldn't load ${script.url} for an interactive output: ${result.error}`);
+      void panel.webview.postMessage({ type: 'outputScript', url: script.url, ...result });
+    }));
   }
 
   private async openLink(href: string): Promise<void> {

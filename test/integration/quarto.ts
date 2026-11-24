@@ -67,8 +67,16 @@ export async function quartoBuildSteps(api: MdiffApi, folder: vscode.Uri): Promi
   assert.match(html, /id="fig-loss"><div class="qout"><img class="qout-img"/);
   assert.match(html, /2 models compared/);
   assert.ok(!html.includes('made by this cell'), 'no placeholder is left');
+  // The output that draws itself with a script: in a sandboxed frame, where its script runs and
+  // can reach neither the page nor VS Code, and the page takes no message from it.
+  assert.match(html, /<div class="qout"><div class="qout-frame" data-frame="/);
+  assert.ok(!/<script/.test(html), 'no script of the document is in the page');
+  const height = await waitFor('the interactive output to draw itself', () => api.preview.lastFrames.find((h) => h >= 170));
+  assert.equal(height, 180, 'its script ran, without reach to the page or acquireVsCodeApi');
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.ok(api.preview.lastRendered!.rows > 3 && !api.preview.lastRendered!.lastRow.includes('Forged'), `the page took no message from the frame: ${JSON.stringify(api.preview.lastRendered)}`);
   clean();
-  console.log('MDIFF INTEGRATION: Quarto preview build', JSON.stringify(built.sides));
+  console.log('MDIFF INTEGRATION: Quarto preview build', JSON.stringify(built.sides), 'frames', JSON.stringify(api.preview.lastFrames));
 
   // 2. An edit makes the build older than the file; the page says so and keeps the values.
   const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === file.toString())!;
@@ -116,6 +124,8 @@ export async function quartoBuildSteps(api: MdiffApi, folder: vscode.Uri): Promi
   assert.match(d.html, /<div class="qout out-chg"><div class="qout-md"><table>/);
   assert.match(d.html, /<tr class="r-chg"><td[^>]*>E1<\/td><td[^>]*><span class="x-ins">0\.265<\/span><\/td><td[^>]*><span class="x-ins">13000<\/span>/);
   assert.ok(d.changed + d.added > changedBefore, `more blocks are changes (${changedBefore} → ${d.changed + d.added})`);
+  // The interactive output is the same in both versions, and drawn in each column.
+  await waitFor('the interactive outputs of both columns', () => api.lastFrames.filter((h) => h === 180).length >= 2 || undefined);
   await new Promise((r) => setTimeout(r, 2000));
   assert.deepEqual(running(), [], 'no process of the build is left');
   clean();

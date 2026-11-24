@@ -247,6 +247,9 @@ pre.mermaid-source { display: none; }
 .cell .qout { overflow-x: auto; }
 .cell .qout > :first-child, .cell .qout-md > :first-child { margin-top: 0; }
 .cell .qout > :last-child, .cell .qout-md > :last-child { margin-bottom: 0; }
+/* An output that draws itself with scripts, in a frame of its own; white, as such outputs are made for a white page. */
+.cell .qout-frame { margin: 2px 0; }
+.cell .qout-iframe { display: block; width: 100%; border: 0; border-radius: 3px; background: #fff; }
 .cell .qout-img { max-width: 100%; max-height: 80vh; background: #fff; border-radius: 3px; }
 .cell .qout-text { margin: 2px 0; padding: 4px 8px; font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; }
 .cell .qout-text.error, .cell .qout-text.stderr { color: var(--vscode-errorForeground, #d1242f); }

@@ -29,6 +29,7 @@ const html = buildShell({
   previewCss: asset('media/preview.css'),
   previewJs: asset('media/preview.js'),
   diagramsJs: asset('media/mermaid/diagrams.js'),
+  framesJs: asset('media/frames/frames.js'),
   mermaidJs: asset('media/mermaid/mermaid.js'),
   initial: {
     type: 'update',

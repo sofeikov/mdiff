@@ -32,3 +32,16 @@ plt.show()
 ```{python}
 print(f"{len(df)} models compared")
 ```
+
+```{python}
+# An output that draws itself with a script, as a Plotly figure does. It also tries to reach the
+# page around its frame, which it must not.
+from IPython.display import HTML
+display(HTML("""<div id="drawn" style="height:120px"></div><script>
+var d = document.getElementById("drawn"), isolated = false;
+try { parent.document.body; } catch (e) { isolated = true; }
+d.style.height = (isolated && typeof acquireVsCodeApi === "undefined" ? 180 : 240) + "px";
+d.textContent = "Drawn by a script";
+parent.postMessage({ type: "update", title: "Forged", labelA: "", labelB: "", html: '<div class="row">Forged</div>', hunks: 0, added: 0, removed: 0, changed: 0, reset: false }, "*");
+</script>"""))
+```

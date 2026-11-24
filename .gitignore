@@ -2,5 +2,6 @@ node_modules/
 dist/
 media/katex/
 media/mermaid/
+media/frames/
 *.vsix
 test/out/

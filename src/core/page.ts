@@ -8,6 +8,8 @@ export interface ShellOptions {
   /** The script that draws Mermaid diagrams, and the Mermaid library, which it loads when a page has a diagram. */
   diagramsJs: string;
   mermaidJs: string;
+  /** The script that draws interactive outputs of a Quarto build in sandboxed frames. */
+  framesJs: string;
   /** Data to show at once, for the standalone page. The webview sends it in a message instead. */
   initial?: UpdateMessage;
 }
@@ -111,6 +113,7 @@ export function buildShell(o: ShellOptions): string {
 <main id="content"></main>
 ${initial}
 <script nonce="${o.nonce}" src="${o.diagramsJs}"></script>
+<script nonce="${o.nonce}" src="${o.framesJs}"></script>
 <script nonce="${o.nonce}" src="${o.previewJs}"></script>
 </body>
 </html>`;

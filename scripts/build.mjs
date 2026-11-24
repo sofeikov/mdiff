@@ -1,5 +1,5 @@
-// Bundles the extension, the preview CLI and the page's diagram script, and copies the KaTeX and
-// Mermaid assets.
+// Bundles the extension, the preview CLI and the page's scripts for diagrams and interactive
+// outputs, and copies the KaTeX and Mermaid assets.
 import * as esbuild from 'esbuild';
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 
@@ -17,6 +17,7 @@ for (const font of readdirSync('node_modules/katex/dist/fonts').filter((f) => f.
 // Mermaid, which the page loads only when it has a diagram to draw. The tiny build leaves out
 // mindmaps and architecture diagrams, for half the size of the full one.
 rmSync('media/mermaid', { recursive: true, force: true });
+rmSync('media/frames', { recursive: true, force: true });
 mkdirSync('media/mermaid', { recursive: true });
 copyFileSync('node_modules/@mermaid-js/tiny/dist/mermaid.tiny.js', 'media/mermaid/mermaid.js');
 
@@ -35,16 +36,19 @@ const common = {
 const contexts = await Promise.all([
   esbuild.context({ ...common, entryPoints: ['src/extension.ts'], outfile: 'dist/extension.js', external: ['vscode'], minify: !watch }),
   esbuild.context({ ...common, entryPoints: ['src/cli.ts'], outfile: 'dist/cli.js' }),
-  esbuild.context({
-    entryPoints: ['src/webview/diagrams.ts'],
-    outfile: 'media/mermaid/diagrams.js',
+  ...[
+    ['src/webview/diagrams.ts', 'media/mermaid/diagrams.js'],
+    ['src/webview/frames.ts', 'media/frames/frames.js'],
+  ].map(([entry, outfile]) => esbuild.context({
+    entryPoints: [entry],
+    outfile,
     bundle: true,
     platform: 'browser',
     format: 'iife',
     target: 'es2022',
     logLevel: 'info',
     minify: !watch,
-  }),
+  })),
 ]);
 
 if (watch) {

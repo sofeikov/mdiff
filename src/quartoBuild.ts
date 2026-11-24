@@ -159,6 +159,11 @@ export class QuartoBuilds implements vscode.Disposable {
     this.channel().show(true);
   }
 
+  /** Adds a line to the output channel of the builds. */
+  note(line: string): void {
+    this.say(line);
+  }
+
   cancel(): void {
     this.current?.cancel.cancel();
   }

@@ -1,6 +1,7 @@
 import type { MarkdownIt, RendererRule, StateBlock, StateCore, StateInline, Token } from 'markdown-it';
 import yaml from 'js-yaml';
 import { OPTION_LINE, outputsKey, RunCursor, type QuartoRun, type RunCell, type RunExpr, type RunOutput } from './quartoRun';
+import { needsFrame, scriptsOnly } from './outputFrame';
 
 /**
  * Quarto syntax on top of Markdown: attributes of headings, section numbers, cross-references,
@@ -566,7 +567,9 @@ export function cellInfo(lang: string, code: string, meta: unknown): Omit<CellIn
 /** The outputs of a cell's run that the rendered document shows. */
 export function shownOutputs(cell: Pick<CellInfo, 'code' | 'noOutput' | 'noWarning'>, run: RunCell | undefined): RunOutput[] {
   if (!run || cell.noOutput || cell.code === 'excluded') return [];
-  return run.outputs.filter((o) => !(cell.noWarning && o.kind === 'stream' && o.name === 'stderr'));
+  // An output of scripts alone (Plotly's set-up before its first figure) shows nothing, and each
+  // interactive output is drawn in a frame of its own, where another's scripts don't reach.
+  return run.outputs.filter((o) => !(cell.noWarning && o.kind === 'stream' && o.name === 'stderr') && !(o.kind === 'html' && scriptsOnly(o.html)));
 }
 
 /** The Markdown text of an output, which a diff compares like the document's own: a table a cell writes. */
@@ -586,8 +589,12 @@ function outputHtml(md: MarkdownIt, o: RunOutput, asis: boolean): string {
       return `<img class="qout-img" alt="" src="${src}">`;
     }
     case 'html':
-      // The page runs no scripts of a document, so an interactive plot can't be drawn here.
-      return /<script[\s>]/i.test(o.html) ? '<div class="qfig-ph">Interactive output: drawn only in the rendered document</div>' : `<div class="qout-html">${o.html}</div>`;
+      // The page runs no script of a document. An output that draws itself with scripts (a
+      // Plotly figure) goes into a sandboxed frame, which the page makes from the HTML it finds
+      // here (src/webview/frames.ts); URI-encoded, so nothing of it is markup of the page.
+      return needsFrame(o.html)
+        ? `<div class="qout-frame" data-frame="${encodeURIComponent(o.html)}"><div class="qfig-ph">Interactive output</div></div>`
+        : `<div class="qout-html">${o.html}</div>`;
     case 'stream':
       // What a cell prints with `output: asis` is Markdown of the document.
       return asis && o.name !== 'stderr' ? markdown(o.text) : `<pre class="qout-text${o.name === 'stderr' ? ' stderr' : ''}">${esc(o.text.replace(/\n$/, ''))}</pre>`;
