@@ -2,7 +2,7 @@
   "name": "mdiff",
   "displayName": "Markdown Rendered Diff",
   "description": "Shows the diff of a Markdown or Quarto file as rendered output, next to the source diff, and a rendered preview of Quarto files.",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "publisher": "KonstantinSofeikov",
   "license": "MIT",
   "repository": {
@@ -144,7 +144,7 @@
           "type": "string",
           "default": "",
           "scope": "machine-overridable",
-          "markdownDescription": "Experimental. The command that a Quarto build runs, up to the file name, for example `conda run -n reports quarto render`. The extension adds the file and its own options (`--to gfm -M keep-ipynb:true -M freeze:false --no-execute-daemon --output-dir …`). Empty: `quarto render`, through `uv run` when the project has a `uv.lock`. A build runs only when you click **Build with Quarto**, and never in an untrusted workspace."
+          "markdownDescription": "Experimental. The command that a Quarto build runs, up to the file name, for example `conda run -n reports quarto render`. The extension adds the file and its own options (`--to gfm -M keep-ipynb:true -M freeze:false --no-execute-daemon --output-dir …`). Empty: `quarto render`, through `uv run --all-extras` when the project has a `uv.lock` (plain `uv run` when its extras conflict). A build runs only when you click **Build with Quarto**, and never in an untrusted workspace."
         }
       }
     },

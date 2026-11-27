@@ -6,7 +6,7 @@ import { createMarkdown } from '../src/core/markdown';
 import { frameDocument, frameScripts, needsFrame, scriptsOnly, withoutRunIds } from '../src/core/outputFrame';
 import { integrityHolds } from '../src/outputScripts';
 import { createHash } from 'node:crypto';
-import { cellCode, failureLine, hiddenPath, keptNotebook, outputsKey, parseQuartoRun, quartoCommand, readQuartoRun, RunCursor, splitCommand, type QuartoRun } from '../src/core/quartoRun';
+import { cellCode, extrasConflict, failureLine, hiddenPath, keptNotebook, outputsKey, parseQuartoRun, quartoCommand, readQuartoRun, RunCursor, splitCommand, type QuartoRun } from '../src/core/quartoRun';
 
 // The fixtures are a small document at two versions, and the notebooks Quarto 1.6 kept of them
 // (`quarto render x.qmd --to gfm -M keep-ipynb:true`).
@@ -70,7 +70,10 @@ describe('the build command', () => {
   it('is Quarto as installed, through uv for a uv project, or the user\'s own', () => {
     const tail = ['a.qmd', '--to', 'gfm', '-M', 'keep-ipynb:true', '-M', 'freeze:false', '--no-execute-daemon', '--output-dir', '/tmp/o'];
     expect(quartoCommand('', 'a.qmd', false, '/tmp/o')).toEqual(['quarto', 'render', ...tail]);
-    expect(quartoCommand('', 'a.qmd', true, '/tmp/o')).toEqual(['uv', 'run', 'quarto', 'render', ...tail]);
+    expect(quartoCommand('', 'a.qmd', true, '/tmp/o')).toEqual(['uv', 'run', '--all-extras', 'quarto', 'render', ...tail]);
+    expect(quartoCommand('', 'a.qmd', true, '/tmp/o', false)).toEqual(['uv', 'run', 'quarto', 'render', ...tail]);
+    expect(extrasConflict('uv ended with code 2: error: Extras `a` and `b` are incompatible with the declared conflicts: {`toy[a]`, `toy[b]`}')).toBe(true);
+    expect(extrasConflict("uv ended with code 1: cell 2/6: ModuleNotFoundError: No module named 'lance'")).toBe(false);
     expect(quartoCommand('conda run -n "my env" quarto render', 'a.qmd', true, '/tmp/o')).toEqual(['conda', 'run', '-n', 'my env', 'quarto', 'render', ...tail]);
     expect(splitCommand(`  a 'b c'  "d"  `)).toEqual(['a', 'b c', 'd']);
   });
@@ -87,6 +90,14 @@ describe('the build command', () => {
     const out = 'Starting\n\u001b[91mERROR: The --output-dir flag can only be used when rendering projects.\u001b[39m\n\nStack trace:\n    at render (file:///x.js:1:1)\n';
     expect(failureLine(out)).toBe('ERROR: The --output-dir flag can only be used when rendering projects.');
     expect(failureLine('a\nb\nc\n')).toBe('b c');
+  });
+
+  it('reports a failed cell by its exception, not by the last line of its source', () => {
+    const run = "Executing 'r.quarto_ipynb'\n  Cell 1/6: ''....Done\n  Cell 2/6: ''....\n\nAn error occurred while executing the following cell:\n------------------\n\nimport lance\nshare = n / total\n------------------\n\n";
+    const tb = "\u001b[0;31mModuleNotFoundError\u001b[0m                       Traceback (most recent call last)\nCell \u001b[0;32mIn[2], line 1\u001b[0m\n\u001b[0;32m----> 1\u001b[0m import lance\n\n\u001b[0;31mModuleNotFoundError\u001b[0m: No module named 'lance'\n\n";
+    expect(failureLine(run + tb)).toBe("cell 2/6: ModuleNotFoundError: No module named 'lance'");
+    // Rich's traceback (ZenML installs it) goes to the cell's output, and Quarto reports none.
+    expect(failureLine(run + '\n\n\n')).toBe("cell 2/6 failed, and its error wasn't reported");
   });
 
   it('finds the notebook that Quarto kept', () => {

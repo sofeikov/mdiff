@@ -30,7 +30,7 @@ import * as fs from 'node:fs/promises';
 import { lstatSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { failureLine, hiddenPath, keptNotebook, parseQuartoRun, quartoCommand, readQuartoRun, type QuartoRun } from './core/quartoRun';
+import { extrasConflict, failureLine, hiddenPath, keptNotebook, parseQuartoRun, quartoCommand, readQuartoRun, type QuartoRun } from './core/quartoRun';
 
 /** A build that takes longer than this is stopped. */
 export const TIME_LIMIT_MINUTES = 30;
@@ -392,7 +392,16 @@ export class QuartoBuilds implements vscode.Disposable {
     deadline: number,
     before: Set<string>,
   ): Promise<QuartoRun> {
-    await this.exec(quartoCommand(setting, file, uv, out), folder, env, token, deadline);
+    // ZenML replaces the notebook's traceback with Rich's, printed as the cell's output, which
+    // Quarto doesn't show when the cell fails: the log would say a cell failed but not why.
+    const buildEnv = { ...env, ZENML_ENABLE_RICH_TRACEBACK: 'false' };
+    try {
+      await this.exec(quartoCommand(setting, file, uv, out), folder, buildEnv, token, deadline);
+    } catch (e) {
+      if (setting || !uv || !(e instanceof Error) || !extrasConflict(e.message)) throw e;
+      this.say('The project\'s extras conflict, so they can\'t all be installed: building without them.');
+      await this.exec(quartoCommand(setting, file, uv, out, false), folder, buildEnv, token, deadline);
+    }
     const kept = keptNotebook(path.basename(file), (await fs.readdir(folder)).filter((n) => !before.has(n)));
     if (!kept) throw new Error('Quarto kept no notebook of the document: only documents run by its Jupyter engine (Python, for one) can be built');
     const notebook = path.join(folder, kept);
@@ -484,7 +493,8 @@ export class QuartoBuilds implements vscode.Disposable {
         // Without the colours of a terminal, which an output channel and a message show as codes.
         // eslint-disable-next-line no-control-regex
         const text = chunk.toString().replace(/\u001b\[[0-9;]*m/g, '');
-        tail = (tail + text).slice(-8000);
+        // Long enough for a failed cell's source and its traceback, which say why it failed.
+        tail = (tail + text).slice(-20000);
         this.log?.append(text);
       };
       child.stdout.on('data', out);
